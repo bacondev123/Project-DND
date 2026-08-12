@@ -99,6 +99,3 @@ Ideas welcome. Seeds already on the table:
 - multiple save slots
 - even rarer secret conditions ("full moon", "666 XP", "never harmed a merchant")
 
-## License
-
-*Add your license of choice here.*
