@@ -18,31 +18,24 @@
 
     <section id="hud" class="hud hidden">
       <div class="hud-row">
-        <span id="hudFloor"></span>
-        <span id="hudTurn"></span>
-        <span id="hudClass"></span>
-        <span id="hudPts"></span>
-        <span id="hudSkillPts"></span>
+        <span id="hudFloor"></span><span id="hudTurn"></span><span id="hudClass"></span>
+        <span id="hudPts"></span><span id="hudSkillPts"></span>
       </div>
       <div class="hud-row">
         <span class="hp-label">HP</span>
         <div class="hp-bar"><div id="hpFill"></div></div>
         <span id="hudHp"></span>
-        <span id="hudAc"></span>
-        <span id="hudXp"></span>
-        <span id="hudDmg"></span>
+        <span id="hudAc"></span><span id="hudXp"></span><span id="hudDmg"></span>
       </div>
-      <div class="hud-row">
-        <span id="hudWeapon"></span>
-        <span id="hudStats"></span>
+      <div class="hud-row" id="mpRow">
+        <span class="mp-label">MP</span>
+        <div class="mp-bar"><div id="mpFill"></div></div>
+        <span id="hudMp"></span>
       </div>
+      <div class="hud-row"><span id="hudWeapon"></span><span id="hudStats"></span></div>
       <div class="hud-row">
-        <span id="hudGold"></span>
-        <span id="hudPotions"></span>
-        <span id="hudAbility"></span>
-        <span id="hudSkills"></span>
-        <span id="hudKills"></span>
-        <span id="hudDeaths"></span>
+        <span id="hudGold"></span><span id="hudPotions"></span><span id="hudAbility"></span>
+        <span id="hudSkills"></span><span id="hudKills"></span><span id="hudDeaths"></span>
       </div>
       <div class="hud-row"><span id="hudRelics" class="relics"></span></div>
     </section>
@@ -66,15 +59,16 @@
       <span class="hint">SECRET super-bosses — far stronger than Tiamat; each drops a relic</span>
     </div>
     <div class="controls-help">
-      Move: WASD/HJKL/Arrows (HOLD) · Click: attack/move · F class ability · 1/3 skill slots · T skill tree · C stats · Q potion · X defend · . wait · B shop(M) · V smith(A)
+      Move(hold): WASD/HJKL/Arrows · Click attack/move · F class skill · 1/3 skill slots · T tree · C stats · I inventory · Q HP pot · R MP pot · G wing · X defend · . wait
     </div>
 
     <ul id="log" class="log"></ul>
 
     <div class="buttons">
+      <button id="invButton">🎒 Inventory (I)</button>
       <button id="statButton">📜 Stats (C)</button>
       <button id="skillButton">🌳 Skills (T)</button>
-      <button id="autoButton">▶ Auto-Play Demo</button>
+      <button id="autoButton">▶ Auto-Play</button>
       <button id="speedButton">⏩ 1x</button>
       <button id="restartButton">↻ Restart</button>
       <button id="eraseButton">🗑 Erase data</button>
@@ -86,79 +80,30 @@
       <h2>✦ Choose your class ✦</h2>
       <p id="metaLine" class="shop-gold"></p>
       <button id="continueButton" class="class-btn hidden"></button>
-      <button class="class-btn" data-class="1"><strong>1) Fighter</strong> — High armor and HP. Ability: Second Wind.</button>
-      <button class="class-btn" data-class="2"><strong>2) Rogue</strong> — Fast and deadly. Ability: Sneak Strike.</button>
-      <button class="class-btn" data-class="3"><strong>3) Wizard</strong> — Fragile caster. Ability: Firebolt.</button>
-      <p class="hint">Death only returns you to Floor 1 — everything is kept. Only "Erase data" wipes.</p>
+      <button class="class-btn" data-class="1"><strong>1) Fighter</strong> — Tanky; Second Wind.</button>
+      <button class="class-btn" data-class="2"><strong>2) Rogue</strong> — High crit chance & crit damage; Sneak Strike.</button>
+      <button class="class-btn" data-class="3"><strong>3) Wizard</strong> — MP-based casting; staff powers spells.</button>
+      <p class="hint">Death returns you to Floor 1 keeping everything. Only "Erase data" wipes.</p>
     </div>
   </div>
 
-  <div id="savesOverlay" class="overlay hidden">
-    <div class="panel shop-panel">
-      <h2>✦ Saved expeditions ✦</h2>
-      <div id="savesList" class="shop-list"></div>
-      <p class="hint">Click a save to resume · Esc to close</p>
-    </div>
-  </div>
+  <div id="savesOverlay" class="overlay hidden"><div class="panel shop-panel"><h2>✦ Saved expeditions ✦</h2><div id="savesList" class="shop-list"></div><p class="hint">Click to resume · Esc close</p></div></div>
 
-  <div id="shopOverlay" class="overlay hidden">
-    <div class="panel shop-panel">
-      <h2> Traveling Merchant</h2>
-      <p id="shopGold" class="shop-gold"></p>
-      <div id="shopList" class="shop-list"></div>
-      <p class="hint">Press 1–9 to buy · Esc / B to leave</p>
-    </div>
-  </div>
+  <div id="shopOverlay" class="overlay hidden"><div class="panel shop-panel"><h2> Traveling Merchant</h2><p id="shopGold" class="shop-gold"></p><div id="shopList" class="shop-list"></div><p class="hint">1–9 buy · Esc/B leave · stock varies per floor</p></div></div>
 
-  <div id="smithOverlay" class="overlay hidden">
-    <div class="panel shop-panel">
-      <h2>⚒ Blacksmith</h2>
-      <p id="smithGold" class="shop-gold"></p>
-      <div id="smithList" class="shop-list"></div>
-      <p class="hint">Press 1 to enhance · Esc / V to leave · Enhancement adds +1 raw AND +2% damage</p>
-    </div>
-  </div>
+  <div id="smithOverlay" class="overlay hidden"><div class="panel shop-panel"><h2>⚒ Blacksmith</h2><p id="smithGold" class="shop-gold"></p><div id="smithList" class="shop-list"></div><p class="hint">1 enhance (+1 raw & +2% ALL damage incl. spells) · Esc/V leave</p></div></div>
 
-  <div id="statOverlay" class="overlay hidden">
-    <div class="panel shop-panel">
-      <h2>✦ Character Sheet </h2>
-      <p id="statPts" class="shop-gold"></p>
-      <div id="statList" class="shop-list"></div>
-      <p class="hint">1–4 spend a point · Esc / C to close · stats also grant % damage</p>
-    </div>
-  </div>
+  <div id="invOverlay" class="overlay hidden"><div class="panel shop-panel"><h2>🎒 Inventory</h2><div id="invList" class="shop-list"></div><p class="hint">1–6 use/equip · Esc/I close</p></div></div>
 
-  <div id="skillOverlay" class="overlay hidden">
-    <div class="panel shop-panel">
-      <h2>🌳 Skill Tree</h2>
-      <p id="skillPts" class="shop-gold"></p>
-      <div class="hud-row" style="justify-content:center">
-        <button id="slot1Button" class="shop-item" style="flex:1"></button>
-        <button id="slot2Button" class="shop-item" style="flex:1"></button>
-      </div>
-      <div id="skillList" class="shop-list"></div>
-      <p class="hint">1–9 learn node · Q/E cycle slot 1/2 · Esc / T to close</p>
-    </div>
-  </div>
+  <div id="statOverlay" class="overlay hidden"><div class="panel shop-panel"><h2>✦ Character Sheet ✦</h2><p id="statPts" class="shop-gold"></p><div id="statList" class="shop-list"></div><p class="hint">1–4 spend · Esc/C close</p></div></div>
 
-  <div id="deathOverlay" class="overlay hidden">
-    <div class="panel death-panel">
-      <h2 class="death-title">YOU DIED</h2>
-      <p id="deathReason"></p>
-      <p id="deathInfo" class="hint"></p>
-      <button id="riseButton">☀ Rise at Floor 1</button>
-    </div>
-  </div>
+  <div id="skillOverlay" class="overlay hidden"><div class="panel shop-panel"><h2>🌳 Skill Tree</h2><p id="skillPts" class="shop-gold"></p>
+    <div class="hud-row" style="justify-content:center"><button id="slot1Button" class="shop-item" style="flex:1"></button><button id="slot2Button" class="shop-item" style="flex:1"></button></div>
+    <div id="skillList" class="shop-list"></div><p class="hint">1–9 learn · Q/E cycle slots (menu only; in combat slots are keys 1 & 3) · Esc/T close</p></div></div>
 
-  <div id="endOverlay" class="overlay hidden">
-    <div class="panel">
-      <h2 id="endTitle"></h2>
-      <p id="endReason"></p>
-      <p id="endScore"></p>
-      <p id="endStats"></p>
-      <button id="playAgainButton">Play Again</button>
-    </div>
-  </div>
+  <div id="deathOverlay" class="overlay hidden"><div class="panel death-panel"><h2 class="death-title">YOU DIED</h2><p id="deathReason"></p><p id="deathInfo" class="hint"></p><button id="riseButton">☀ Rise at Floor 1</button></div></div>
+
+  <div id="endOverlay" class="overlay hidden"><div class="panel"><h2 id="endTitle"></h2><p id="endReason"></p><p id="endScore"></p><p id="endStats"></p><button id="playAgainButton">Play Again</button></div></div>
 
   <script src="script.js"></script>
 </body>
