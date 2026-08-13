@@ -1,37 +1,38 @@
 /* ============================================================
-   DND (Dungeon and dragons) — v9
-   FIX: portal tier spam (weighted picks, echo 25% not 100%)
-   + Slash VFX, skill tree + 2 active slots, % damage stats,
-     blacksmith +1..+20 (raw + %), buffed Weapons, CONFIG block
-   ============================================================
-   CONFIGURATION GUIDE (tune your game here):
-   - CONFIG below: global balance knobs (scaling, %, costs, chances)
-   - ENEMY_TYPES: monster base stats / boss strength
-   - SHOP_WEAPONS: weapon tiers & prices
-   - SKILLS / SKILL_ORDER: skill tree nodes
-   - RELICS: secret-boss loot
+   DND (Dungeon and dragons) — v10
+   FIXES: staff powers spells; floor-100 stabilized (no portals
+   there, fairer Tiamat); NaN-proof player fields; skill tree
+   works; slot keys 1/3 (Q/E only inside menu); rogue crit spec.
+   NEW: MP system, inventory, higher potions, MP potions, random
+   merchant stock (scroll 5% / shoes 3% / wing 2%), swift shoes
+   (2 tiles/turn), holy wing (fly ≤3, 20-turn CD), stat/weapon
+   breakdowns, grace turn vs spawn-kill.
    ============================================================ */
 
 const CONFIG={
- floors:{max:100,turnCap:99999},
- xp:{levelGrowth:1.3, floorBonus:0.09, perLevelDmgPct:1},          // % dmg per level
- stats:{strPct:0.5, dexPct:0.4, conPct:0.3, intPct:0.5, conHp:2},  // % dmg per stat point
+ floors:{max:100,turnCap:9999},
+ xp:{levelGrowth:1.35, floorBonus:0.09, perLevelDmgPct:1},
+ stats:{strPct:0.5, dexPct:0.4, conPct:0.3, intPct:0.5, conHp:2, intMp:2},
  statPointsPerLevel:3, skillPointsPerLevel:1,
- proficiencyDiv:3,            // 2 + floor((lvl-1)/div)
- levelHpBase:3,               // hp per level = base + conMod
+ proficiencyDiv:3, levelHpBase:3,
  monsterScale:{hp:0.05, atkDiv:5, acDiv:8, dmgDiv:6},
  portal:{base:0.05, greedGold:300, greedBonus:0.02, dragonEcho:0.25},
  enhance:{max:20, rawPerPlus:1, pctPerPlus:2, costBase:20, costGrowth:1.25},
+ mp:{base:20, fireboltCost:4, restoreMin:5, restoreMax:10},
+ rogue:{critChance:10, critExtraDice:1},
+ prices:{hp1:15, hp2:40, mp:25, scroll:120, shoes:200, wing:300},
+ stock:{scroll:0.05, shoes:0.03, wing:0.02, hp2:0.35},
+ items:{wingCd:20, flyRadius:3},
  speed:{auto:170, holdDelay:300, holdInterval:150},
 };
 
 function mulberry32(a){return function(){a|=0;a=(a+0x6D2B79F5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
-let random = mulberry32((Date.now() % 2147483647) >>> 0);
+let random=mulberry32((Date.now()%2147483647)>>>0);
 function randInt(a,b){return a+Math.floor(random()*(b-a+1));}
+function num(v,d){return (typeof v==="number"&&isFinite(v))?v:d;}
 
-const WIDTH=27, HEIGHT=13, MAX_FLOOR=CONFIG.floors.max, MAX_TURNS=CONFIG.floors.turnCap;
-const CELL=24, BOARD_PAD=12;
-
+const WIDTH=27,HEIGHT=13,MAX_FLOOR=CONFIG.floors.max,MAX_TURNS=CONFIG.floors.turnCap;
+const CELL=24,BOARD_PAD=12;
 function die(n){return Math.floor(random()*n)+1;}
 function rollDice(n,s){let t=0;for(let i=0;i<n;i++)t+=die(s);return t;}
 function abilityMod(s){return Math.floor((s-10)/2);}
@@ -42,7 +43,6 @@ const CLASSES=[
  {name:"Wizard",maxhp:11,ac:12,str:8,dex:14,con:12,int:17,abilityName:"Firebolt",abilityMax:3,primary:"int",weapon:{name:"Oak Staff",die:6,dice:1,bonus:0}}
 ];
 
-// Weapons (secret bosses) are now FAR above Tiamat & elites (FF7-correct)
 const ENEMY_TYPES={
  goblin:{glyph:"g",name:"Goblin",hp:6,ac:12,attack:3,dice:1,damageDie:4,damageMod:1,xp:25,gold:3,sight:8},
  skeleton:{glyph:"s",name:"Skeleton",hp:9,ac:13,attack:4,dice:1,damageDie:6,damageMod:2,xp:40,gold:5,sight:8},
@@ -53,7 +53,7 @@ const ENEMY_TYPES={
  demon:{glyph:"&",name:"Demon",hp:40,ac:18,attack:12,dice:2,damageDie:8,damageMod:8,xp:380,gold:30,sight:8},
  deathKnight:{glyph:"K",name:"Death Knight",hp:55,ac:20,attack:14,dice:2,damageDie:10,damageMod:9,xp:550,gold:40,sight:8},
  dragon:{glyph:"D",name:"Red Dragon",hp:35,ac:15,attack:7,dice:1,damageDie:8,damageMod:4,xp:500,gold:100,sight:99,elite:true},
- tiamat:{glyph:"T",name:"Tiamat, Dragon Queen",hp:300,ac:20,attack:16,dice:2,damageDie:10,damageMod:12,xp:5000,gold:1500,sight:99,final:true},
+ tiamat:{glyph:"T",name:"Tiamat, Dragon Queen",hp:300,ac:19,attack:14,dice:2,damageDie:8,damageMod:10,xp:5000,gold:1500,sight:99,final:true},
  sapphireWeapon:{glyph:"W",name:"Sapphire Weapon",hp:150,ac:18,attack:12,dice:2,damageDie:8,damageMod:8,xp:2000,gold:300,sight:99,secret:true},
  diamondWeapon:{glyph:"V",name:"Diamond Weapon",hp:260,ac:20,attack:15,dice:2,damageDie:10,damageMod:10,xp:3500,gold:500,sight:99,secret:true},
  ultimaWeapon:{glyph:"U",name:"Ultima Weapon",hp:420,ac:22,attack:18,dice:2,damageDie:12,damageMod:12,xp:6000,gold:800,sight:99,secret:true},
@@ -65,8 +65,8 @@ const RELICS={
  sapphireWeapon:{key:"sapphire",name:"Sapphire Ring",desc:"+2 AC",apply:p=>{p.ac+=2;}},
  diamondWeapon:{key:"diamond",name:"Diamond Aegis",desc:"-1 damage taken",apply:()=>{}},
  ultimaWeapon:{key:"ultima",name:"Ultima Core",desc:"+3 attack & damage",apply:()=>{}},
- rubyWeapon:{key:"ruby",name:"Ruby Heart",desc:"+2 all attributes",apply:p=>{p.str+=2;p.dex+=2;p.con+=2;p.int+=2;p.maxhp+=4;p.hp=Math.min(p.maxhp,p.hp+4);}},
- emeraldWeapon:{key:"emerald",name:"Emerald Harp",desc:"Regen 2 HP/turn, +1 ability use",apply:p=>{p.abilityMax+=1;p.abilityUses+=1;}}
+ rubyWeapon:{key:"ruby",name:"Ruby Heart",desc:"+2 all attributes",apply:p=>{p.str+=2;p.dex+=2;p.con+=2;p.int+=2;p.maxhp+=4;p.hp=Math.min(p.maxhp,p.hp+4);p.maxmp=(p.maxmp||0)+4;p.mp=Math.min(p.maxmp,p.mp+4);}},
+ emeraldWeapon:{key:"emerald",name:"Emerald Harp",desc:"Regen 2 HP/turn, +5 max MP",apply:p=>{p.maxmp=(p.maxmp||0)+5;p.mp=Math.min(p.maxmp,p.mp+5);}}
 };
 
 const SHOP_WEAPONS=[
@@ -80,9 +80,8 @@ const SHOP_WEAPONS=[
  {name:"Masamune",die:12,dice:2,bonus:10,cost:800,tier:8}
 ];
 
-// ---------- Skill tree ----------
 const SKILLS={
- p_mastery:{name:"Weapon Mastery",type:"passive",cost:1,req:null,desc:"+8% weapon damage"},
+ p_mastery:{name:"Weapon Mastery",type:"passive",cost:1,req:null,desc:"+8% all damage"},
  p_hardened:{name:"Battle Hardened",type:"passive",cost:1,req:"p_mastery",desc:"+12 Max HP"},
  p_precision:{name:"Precision",type:"passive",cost:1,req:"p_mastery",desc:"+5% crit chance"},
  p_scholar:{name:"Scholarship",type:"passive",cost:1,req:"p_hardened",desc:"+10% XP gained"},
@@ -99,16 +98,17 @@ const SKILL_ORDER=["p_mastery","p_hardened","p_precision","p_scholar","p_vampire
 
 let player=null,map=[],enemies=[],items=[],stairs=null,merchant=null,smith=null,portal=null;
 let logMessages=[],turn=0,state="title",endReason="";
-let autoMode=false,autoTimer=null,shopOpen=false,smithOpen=false,statOpen=false,skillOpen=false,savesOpen=false,fxQueue=[];
+let autoMode=false,autoTimer=null,shopOpen=false,smithOpen=false,statOpen=false,skillOpen=false,invOpen=false,savesOpen=false,fxQueue=[];
 let meta={bestScore:0,deepestFloor:0,wins:0,runs:0,deaths:0};
-let activeSlot=null;
-let speedMult=1;
+let activeSlot=null,speedMult=1;
 const SPEEDS=[1,3,5];
 
 const $=id=>document.getElementById(id);
 const boardEl=$("board"),boardWrap=$("boardWrap"),fxLayer=$("fxLayer"),logEl=$("log"),hudEl=$("hud"),
-hpFill=$("hpFill"),classOverlay=$("classOverlay"),endOverlay=$("endOverlay"),shopOverlay=$("shopOverlay"),
-shopList=$("shopList"),shopGold=$("shopGold"),smithOverlay=$("smithOverlay"),smithList=$("smithList"),smithGold=$("smithGold"),
+hpFill=$("hpFill"),mpFill=$("mpFill"),mpRow=$("mpRow"),
+classOverlay=$("classOverlay"),endOverlay=$("endOverlay"),shopOverlay=$("shopOverlay"),shopList=$("shopList"),shopGold=$("shopGold"),
+smithOverlay=$("smithOverlay"),smithList=$("smithList"),smithGold=$("smithGold"),
+invOverlay=$("invOverlay"),invList=$("invList"),
 statOverlay=$("statOverlay"),statList=$("statList"),statPts=$("statPts"),
 skillOverlay=$("skillOverlay"),skillList=$("skillList"),skillPts=$("skillPts"),slot1Button=$("slot1Button"),slot2Button=$("slot2Button"),
 autoButton=$("autoButton"),speedButton=$("speedButton"),eraseButton=$("eraseButton"),continueButton=$("continueButton"),
@@ -116,7 +116,23 @@ metaLine=$("metaLine"),savesOverlay=$("savesOverlay"),savesList=$("savesList"),
 deathOverlay=$("deathOverlay"),deathReason=$("deathReason"),deathInfo=$("deathInfo"),riseButton=$("riseButton"),
 vignetteEl=$("vignette"),embersEl=$("embers");
 
-// ---------- Saves ----------
+// ---------- Saves + NaN-proof migration ----------
+function newInventory(){return {hp1:2,hp2:0,mp:0,scroll:0,shoes:false,shoesEq:false,wing:false};}
+function sanitizePlayer(p){
+ p.skills=p.skills||{};p.slots=p.slots||[null,null];p.cd=p.cd||{};
+ p.skillPoints=num(p.skillPoints,0);p.statPoints=num(p.statPoints,0);
+ p.spent=p.spent||{str:0,dex:0,con:0,int:0};
+ p.deaths=num(p.deaths,0);p.secretKills=num(p.secretKills,0);
+ p.wingCd=num(p.wingCd,0);p.flightArmed=false;p.grace=num(p.grace,0);
+ if(!p.inventory){p.inventory=newInventory();p.inventory.hp1=num(p.potions,2);}
+ p.inventory.hp1=num(p.inventory.hp1,0);p.inventory.hp2=num(p.inventory.hp2,0);
+ p.inventory.mp=num(p.inventory.mp,0);p.inventory.scroll=num(p.inventory.scroll,0);
+ if(p.classIndex===3){
+  p.maxmp=num(p.maxmp,CONFIG.mp.base+Math.max(0,abilityMod(p.int))*CONFIG.stats.intMp);
+  p.mp=num(p.mp,p.maxmp);
+ }
+ return p;
+}
 function loadSave(){
  try{
   const raw=localStorage.getItem("dnd_meteor_crypt_save_v1");
@@ -133,7 +149,8 @@ function persist(mode){
   if(activeSlot){
    const prev=data.slots[activeSlot];
    if(mode==="run"&&player){
-    data.slots[activeSlot]={player:player,map:map,enemies:enemies,items:items,stairs:stairs,merchant:merchant,smith:smith,
+    const snap=Object.assign({},player);snap.flightArmed=false;
+    data.slots[activeSlot]={player:snap,map:map,enemies:enemies,items:items,stairs:stairs,merchant:merchant,smith:smith,
      portal:portal,turn:turn,logMessages:logMessages,created:prev?prev.created:Date.now(),
      status:prev&&prev.status==="victorious"?"victorious":"alive"};
    }else if(prev&&mode==="victorious"){prev.status="victorious";data.slots[activeSlot]=prev;}
@@ -149,7 +166,7 @@ function renderSaves(){
  const ids=Object.keys(slots).sort((a,b)=>(slots[b].created||0)-(slots[a].created||0));
  savesList.innerHTML=ids.map((id,i)=>{const r=slots[id],p=r.player;if(!p)return"";
   const tag=r.status==="victorious"?"★ victorious":"▶ delving";
-  return '<button class="shop-item" data-slot="'+id+'"><span>'+(i+1)+") Floor "+p.floor+" · "+p.className+" Lv"+p.level+" · HP "+p.hp+"/"+p.maxhp+" · 💀"+(p.deaths||0)+"</span>"+'<span class="si-cost">'+tag+"</span></button>";
+  return '<button class="shop-item" data-slot="'+id+'"><span>'+(i+1)+") Floor "+p.floor+" · "+p.className+" Lv"+p.level+" · HP "+p.hp+"/"+p.maxhp+" · 💀"+num(p.deaths,0)+"</span>"+'<span class="si-cost">'+tag+"</span></button>";
  }).join("")||'<p class="hint">No saves yet.</p>';
 }
 function continueRun(id){
@@ -157,17 +174,18 @@ function continueRun(id){
  if(!r||!r.player)return;
  if(data.meta)meta=data.meta;
  activeSlot=id;
- player=r.player;map=r.map||[];enemies=r.enemies||[];items=r.items||[];
+ player=sanitizePlayer(r.player);
+ map=r.map||[];enemies=r.enemies||[];items=r.items||[];
  stairs=r.stairs||null;merchant=r.merchant||null;smith=r.smith||null;portal=r.portal||null;
- turn=r.turn||0;logMessages=r.logMessages||[];
- player.skills=player.skills||{};player.slots=player.slots||[null,null];player.cd=player.cd||{};player.skillPoints=player.skillPoints||0;
+ turn=num(r.turn,0);logMessages=r.logMessages||[];
  state="play";
- closeShop();closeSmith();closeStats();closeSkills();closeSaves();clearHold();
+ closeAll();clearHold();
  classOverlay.classList.add("hidden");endOverlay.classList.add("hidden");deathOverlay.classList.add("hidden");hudEl.classList.remove("hidden");
  addLog("You resume your delve.","heal");
  if(player.hp<=0){performRevive();return;}
  persist("run");render();
 }
+function closeAll(){closeShop();closeSmith();closeStats();closeSkills();closeInv();closeSaves();}
 function updateTitleInfo(){
  metaLine.textContent="Best "+meta.bestScore+" · Deepest "+meta.deepestFloor+" · Wins "+meta.wins+" · Deaths "+(meta.deaths||0)+" · Runs "+meta.runs;
  const n=slotCount();
@@ -189,6 +207,7 @@ function occupied(x,y){
  return enemyAt(x,y)!==null;
 }
 function dist(ax,ay,bx,by){return Math.abs(ax-bx)+Math.abs(ay-by);}
+function cheb(ax,ay,bx,by){return Math.max(Math.abs(ax-bx),Math.abs(ay-by));}
 const DIRS=[[0,-1],[0,1],[-1,0],[1,0]];
 
 function findFirstStep(sx,sy,tx,ty){
@@ -215,11 +234,13 @@ function createPlayer(ci){
  const c=CLASSES[ci-1];
  player={classIndex:ci,className:c.name,level:1,xp:0,xpNext:60,
   hp:c.maxhp,maxhp:c.maxhp,ac:c.ac,str:c.str,dex:c.dex,con:c.con,int:c.int,
-  gold:10,potions:2,abilityName:c.abilityName,abilityUses:c.abilityMax,abilityMax:c.abilityMax,
+  gold:10,abilityName:c.abilityName,abilityUses:c.abilityMax,abilityMax:c.abilityMax,
   primary:c.primary,weapon:{name:c.weapon.name,die:c.weapon.die,dice:c.weapon.dice,bonus:c.weapon.bonus,enhance:0,tier:0},
-  trainHp:0,trainAc:0,trainFocus:0,statPoints:0,skillPoints:0,skills:{},slots:[null,null],cd:{},
-  autoCycle:0,secretKills:0,deaths:0,relics:{},dragonSlainLastFloor:false,
+  trainHp:0,trainAc:0,trainFocus:0,statPoints:0,skillPoints:0,skills:{},slots:[null,null],cd:{},spent:{str:0,dex:0,con:0,int:0},
+  autoCycle:0,secretKills:0,deaths:0,relics:{},dragonSlainLastFloor:false,inventory:newInventory(),
+  mp:0,maxmp:0,wingCd:0,flightArmed:false,grace:1,
   defending:false,x:2,y:2,floor:1,kills:0};
+ if(ci===3){player.maxmp=CONFIG.mp.base+Math.max(0,abilityMod(player.int))*CONFIG.stats.intMp;player.mp=player.maxmp;}
 }
 function primaryMod(){
  if(player.primary==="str")return abilityMod(player.str);
@@ -229,25 +250,19 @@ function primaryMod(){
 function proficiency(){return 2+Math.floor((player.level-1)/CONFIG.proficiencyDiv);}
 function weaponBonus(){return player.weapon.bonus+player.weapon.enhance*CONFIG.enhance.rawPerPlus;}
 function attackBonus(){return primaryMod()+proficiency()+weaponBonus()+(player.relics.ultima?3:0);}
-function statPctDamage(){
- return player.str*CONFIG.stats.strPct+player.dex*CONFIG.stats.dexPct+player.con*CONFIG.stats.conPct+player.int*CONFIG.stats.intPct;
-}
-function totalDamagePct(){
- return 1+(statPctDamage()+player.level*CONFIG.xp.perLevelDmgPct+player.weapon.enhance*CONFIG.enhance.pctPerPlus+(player.skills.p_mastery?8:0))/100;
-}
-function critChance(){return player.skills.p_precision?5:0;}
+function statPctDamage(){return player.str*CONFIG.stats.strPct+player.dex*CONFIG.stats.dexPct+player.con*CONFIG.stats.conPct+player.int*CONFIG.stats.intPct;}
+function totalDamagePct(){return 1+(statPctDamage()+player.level*CONFIG.xp.perLevelDmgPct+player.weapon.enhance*CONFIG.enhance.pctPerPlus+(player.skills.p_mastery?8:0))/100;}
+function critChance(){return (player.classIndex===2?CONFIG.rogue.critChance:0)+(player.skills.p_precision?5:0);}
 function isCritRoll(roll){return roll===20||(roll!==1&&random()*100<critChance());}
+function weaponAvg(){const base=(player.weapon.dice||1)*(player.weapon.die+1)/2+weaponBonus()+primaryMod();return Math.round(base*totalDamagePct());}
 
 function floorScale(f){
  return{hp:1+Math.min(f-1,90)*CONFIG.monsterScale.hp,atk:Math.floor((f-1)/CONFIG.monsterScale.atkDiv),
   ac:Math.floor((f-1)/CONFIG.monsterScale.acDiv),dmg:Math.floor((f-1)/CONFIG.monsterScale.dmgDiv),
   xp:1+(f-1)*CONFIG.xp.floorBonus,gold:1+(f-1)*0.05};
 }
-
 function spawnEnemy(kind,x,y){
- const t=ENEMY_TYPES[kind];
- const fixed=t.secret||t.final||t.elite;
- const s=floorScale(player.floor);
+ const t=ENEMY_TYPES[kind];const fixed=t.secret||t.final||t.elite;const s=floorScale(player.floor);
  enemies.push({kind,glyph:t.glyph,name:t.name,
   hp:fixed?t.hp:Math.round(t.hp*s.hp),maxhp:fixed?t.hp:Math.round(t.hp*s.hp),
   ac:t.ac+(fixed?0:s.ac),attack:t.attack+(fixed?0:s.atk),
@@ -255,44 +270,27 @@ function spawnEnemy(kind,x,y){
   xp:fixed?t.xp:Math.round(t.xp*s.xp),gold:fixed?t.gold:Math.round(t.gold*s.gold),
   secret:t.secret,final:t.final,elite:t.elite,sight:t.sight,x,y});
 }
-
 function randomEnemyKind(floor){
  const pool=[["goblin",10],["skeleton",10]];
- if(floor>=8)pool.push(["orc",8]);
- if(floor>=18)pool.push(["wraith",8]);
- if(floor>=28)pool.push(["ogre",7]);
- if(floor>=40)pool.push(["drake",6]);
- if(floor>=45)pool.push(["dragon",2]);
- if(floor>=55)pool.push(["demon",5]);
+ if(floor>=8)pool.push(["orc",8]);if(floor>=18)pool.push(["wraith",8]);
+ if(floor>=28)pool.push(["ogre",7]);if(floor>=40)pool.push(["drake",6]);
+ if(floor>=45)pool.push(["dragon",2]);if(floor>=55)pool.push(["demon",5]);
  if(floor>=70)pool.push(["deathKnight",4]);
  let total=0;for(const p of pool)total+=p[1];
  let roll=random()*total;
  for(const p of pool){roll-=p[1];if(roll<=0)return p[0];}
  return "goblin";
 }
-
-// FIXED portal logic: tier by depth, weighted so lower tiers still appear;
-// dragon echo is a +25% chance, not a guaranteed spawn.
 const WEAPON_TIERS=["sapphireWeapon","diamondWeapon","ultimaWeapon","rubyWeapon","emeraldWeapon"];
-function tierForFloor(f){
- if(f<10)return 0;
- if(f<30)return 1;
- if(f<50)return 2;
- if(f<70)return 3;
- if(f<90)return 4;
- return 5;
-}
+function tierForFloor(f){if(f<10)return 0;if(f<30)return 1;if(f<50)return 2;if(f<70)return 3;if(f<90)return 4;return 5;}
 function pickSecretKind(floor){
- const t=tierForFloor(floor);
- if(t<=0)return null;
- const weighted=[];
- for(let i=1;i<=t;i++)weighted.push([i,i===t?3:(i===t-1?2:1)]);
+ const t=tierForFloor(floor);if(t<=0)return null;
+ const weighted=[];for(let i=1;i<=t;i++)weighted.push([i,i===t?3:(i===t-1?2:1)]);
  let total=0;for(const w of weighted)total+=w[1];
  let roll=random()*total;
  for(const w of weighted){roll-=w[1];if(roll<=0)return WEAPON_TIERS[w[0]-1];}
  return WEAPON_TIERS[t-1];
 }
-
 function findFree(minD){
  minD=minD||0;
  for(let a=1;a<=600;a++){const x=randInt(2,WIDTH-1),y=randInt(2,HEIGHT-1);
@@ -308,32 +306,32 @@ function adjacentEnemy(){return enemies.find(e=>dist(player.x,player.y,e.x,e.y)=
 function adjacentEnemies(){return enemies.filter(e=>dist(player.x,player.y,e.x,e.y)===1);}
 function removeEnemy(e){const i=enemies.indexOf(e);if(i!==-1)enemies.splice(i,1);}
 
-// ---------- Stats menu ----------
+// ---------- Stats ----------
 function spendStatPoint(stat,quiet){
  if(!player||player.statPoints<=0)return false;
  const oldDex=abilityMod(player.dex);
- player[stat]+=1;player.statPoints-=1;
+ player[stat]+=1;player.statPoints-=1;player.spent[stat]=(player.spent[stat]||0)+1;
  if(stat==="con"){player.maxhp+=CONFIG.stats.conHp;player.hp=Math.min(player.maxhp,player.hp+CONFIG.stats.conHp);}
  if(stat==="dex"){if(Math.floor(abilityMod(player.dex)/2)>Math.floor(oldDex/2))player.ac+=1;}
+ if(stat==="int"&&player.classIndex===3){player.maxmp+=CONFIG.stats.intMp;player.mp=Math.min(player.maxmp,player.mp+CONFIG.stats.intMp);}
  if(!quiet)addLog(stat.toUpperCase()+" rises to "+player[stat]+"!","level");
- persist("run");
- return true;
+ persist("run");return true;
 }
 function autoSpend(){
  if(!player||player.statPoints<=0)return;
  player.autoCycle=(player.autoCycle||0)+1;
- const c=player.autoCycle;
- let stat=player.primary;
+ const c=player.autoCycle;let stat=player.primary;
  if(c%4===0)stat="con";else if(c%6===0)stat="dex";
  spendStatPoint(stat,true);
 }
 function openStats(){statOpen=true;renderStats();statOverlay.classList.remove("hidden");}
 function closeStats(){statOpen=false;statOverlay.classList.add("hidden");}
 function renderStats(){
- statPts.textContent="Stat points: "+player.statPoints+" · "+player.className+" Lv"+player.level+" · DMG x"+totalDamagePct().toFixed(2);
- const rows=[["str","STR +"+CONFIG.stats.strPct+"% dmg/pt"],["dex","DEX +"+CONFIG.stats.dexPct+"% dmg/pt, +1 AC per +2 mod"],["con","CON +"+CONFIG.stats.conPct+"% dmg/pt, +"+CONFIG.stats.conHp+" HP/pt"],["int","INT +"+CONFIG.stats.intPct+"% dmg/pt"]];
- statList.innerHTML=rows.map((r,i)=>{const v=player[r[0]];
-  return '<button class="shop-item" data-stat="'+r[0]+'" '+(player.statPoints<=0?"disabled":"")+'><span>'+(i+1)+") "+r[1]+" → "+v+"</span>"+'<span class="si-cost">+1</span></button>';
+ const base=CLASSES[player.classIndex-1];
+ statPts.textContent="Pts "+player.statPoints+" · Lv"+player.level+" · DMG x"+totalDamagePct().toFixed(2)+" · Weapon "+player.weapon.dice+"d"+player.weapon.die+" +"+weaponBonus()+" raw (avg ~"+weaponAvg()+")";
+ const rows=[["str","STR +"+CONFIG.stats.strPct+"%/pt"],["dex","DEX +"+CONFIG.stats.dexPct+"%/pt, AC"],["con","CON +"+CONFIG.stats.conPct+"%/pt, +"+CONFIG.stats.conHp+"HP/pt"],["int","INT +"+CONFIG.stats.intPct+"%/pt"+(player.classIndex===3?", +MP":"")]];
+ statList.innerHTML=rows.map((r,i)=>{const v=player[r[0]],b=base[r[0]],s=player.spent[r[0]]||0;
+  return '<button class="shop-item" data-stat="'+r[0]+'" '+(player.statPoints<=0?"disabled":"")+'><span>'+(i+1)+") "+r[1]+" → "+v+" ("+b+"+"+s+")</span>"+'<span class="si-cost">+1</span></button>';
  }).join("");
 }
 
@@ -341,19 +339,16 @@ function renderStats(){
 function unlockedActives(){return SKILL_ORDER.filter(id=>SKILLS[id].type==="active"&&player.skills[id]);}
 function effectiveCd(id){return Math.max(1,(SKILLS[id].cd||1)-(player.skills.p_haste?1:0));}
 function learnSkill(id){
- const s=[id];
+ const s=SKILLS[id];
  if(!s||player.skills[id])return false;
  if(s.req&&!player.skills[s.req]){addLog("Requires "+SKILLS[s.req].name+".","miss");return false;}
- if(player.skillPoints<s.cost){addLog("Not enough skill points.","miss");return false;}
+ if(num(player.skillPoints,0)<s.cost){addLog("Not enough skill points.","miss");return false;}
  player.skillPoints-=s.cost;player.skills[id]=true;
  if(id==="p_hardened"){player.maxhp+=12;player.hp=Math.min(player.maxhp,player.hp+12);}
- addLog("Learned: "+s.name+"!","level");
- persist("run");
- return true;
+ addLog("Learned: "+s.name+"!","level");persist("run");return true;
 }
 function cycleSlot(i){
- const list=unlockedActives();
- const cur=player.slots[i];
+ const list=unlockedActives();const cur=player.slots[i];
  const idx=cur?list.indexOf(cur):-1;
  player.slots[i]=(idx+1>=list.length)?null:list[idx+1];
  persist("run");
@@ -361,13 +356,11 @@ function cycleSlot(i){
 function openSkills(){skillOpen=true;renderSkills();skillOverlay.classList.remove("hidden");}
 function closeSkills(){skillOpen=false;skillOverlay.classList.add("hidden");}
 function renderSkills(){
- skillPts.textContent="Skill points: "+player.skillPoints;
- slot1Button.innerHTML="Slot [1]: "+(player.slots[0]?SKILLS[player.slots[0]].name:"— (press Q)");
- slot2Button.innerHTML="Slot [3]: "+(player.slots[1]?SKILLS[player.slots[1]].name:"— (press E)");
+ skillPts.textContent="Skill points: "+num(player.skillPoints,0);
+ slot1Button.innerHTML="Slot [1]: "+(player.slots[0]?SKILLS[player.slots[0]].name:"—")+" · click/Q cycles (menu)";
+ slot2Button.innerHTML="Slot [3]: "+(player.slots[1]?SKILLS[player.slots[1]].name:"—")+" · click/E cycles (menu)";
  skillList.innerHTML=SKILL_ORDER.map((id,i)=>{
-  const s=SKILLS[id];
-  const learned=player.skills[id];
-  const locked=s.req&&!player.skills[s.req];
+  const s=SKILLS[id];const learned=player.skills[id];const locked=s.req&&!player.skills[s.req];
   const tag=learned?'<span class="si-learned">✔</span>':locked?'<span class="si-locked">🔒</span>':'<span class="si-cost">'+s.cost+"pt</span>";
   return '<button class="shop-item" data-node="'+id+'" '+(learned||locked?"disabled":"")+'><span>'+(i+1)+") "+(s.type==="active"?"⚡":"◆")+" "+s.name+" — "+s.desc+"</span>"+tag+"</button>";
  }).join("");
@@ -375,7 +368,7 @@ function renderSkills(){
 function useSlotSkill(i){
  const id=player.slots[i];
  if(!id){addLog("Slot "+(i+1)+" empty. Press T to assign.","miss");return false;}
- if((player.cd[id]||0)>0){addLog(SKILLS[id].name+" cooling down ("+player.cd[id]+").","miss");return false;}
+ if(num(player.cd[id],0)>0){addLog(SKILLS[id].name+" cooling down ("+player.cd[id]+").","miss");return false;}
  const ok=castSkill(id,null);
  if(ok)player.cd[id]=effectiveCd(id);
  return ok;
@@ -383,7 +376,7 @@ function useSlotSkill(i){
 function castSkill(id,targetOverride){
  switch(id){
   case"a_power":{const t=adjacentEnemy();if(!t){addLog("No adjacent enemy.","miss");return false;}playerAttack(t,{mult:1.6});return true;}
-  case"a_whirl":{const list=adjacentEnemies();if(!list.length){addLog("No adjacent enemies.","miss");return false;}list.forEach(t=>playerAttack(t,{mult:1}));return true;}
+  case"a_whirl":{const l=adjacentEnemies();if(!l.length){addLog("No adjacent enemies.","miss");return false;}l.forEach(t=>playerAttack(t,{mult:1}));return true;}
   case"a_execute":{const t=adjacentEnemy();if(!t){addLog("No adjacent enemy.","miss");return false;}playerAttack(t,{mult:t.hp<t.maxhp*0.4?2.5:1.2});return true;}
   case"a_heal":{const h=Math.round(player.maxhp*0.35);player.hp=Math.min(player.maxhp,player.hp+h);addLog("Healing Light restores "+h+" HP.","heal");fx({kind:"heal",amount:h});return true;}
   case"a_fireball":{const t=targetOverride||nearestEnemy(8)[0];if(!t){addLog("No target in range.","miss");return false;}spellHit(t,1.8);return true;}
@@ -392,7 +385,7 @@ function castSkill(id,targetOverride){
  return false;
 }
 
-// ---------- XP / kills / relics ----------
+// ---------- XP / kills ----------
 function gainXP(amount){
  if(player.skills.p_scholar)amount=Math.round(amount*1.1);
  player.xp+=amount;
@@ -404,14 +397,13 @@ function gainXP(amount){
   if(player.level%2===0)player.ac+=1;
   player.abilityUses=player.abilityMax;
   player.statPoints+=CONFIG.statPointsPerLevel;
-  player.skillPoints+=CONFIG.skillPointsPerLevel;
-  addLog("Level "+player.level+"! +"+CONFIG.statPointsPerLevel+" stat, +"+CONFIG.skillPointsPerLevel+" skill pts (C/T).","level");
+  player.skillPoints=num(player.skillPoints,0)+CONFIG.skillPointsPerLevel;
+  addLog("Level "+player.level+"! +"+CONFIG.statPointsPerLevel+" stat, +"+CONFIG.skillPointsPerLevel+" skill pts.","level");
   fx({kind:"level"});
  }
 }
 function grantRelic(kind){
- const d=RELICS[kind];
- if(!d||player.relics[d.key])return;
+ const d=RELICS[kind];if(!d||player.relics[d.key])return;
  player.relics[d.key]=true;d.apply(player);
  addLog("RELIC OBTAINED: "+d.name+" ("+d.desc+")!","level");
  flashVignette("v-relic");fx({kind:"level"});
@@ -421,17 +413,15 @@ function awardKill(enemy){
  addLog(enemy.name+" is defeated! +"+enemy.xp+" XP, +"+enemy.gold+" gold.","death");
  gainXP(enemy.xp);
  if(random()<0.20)items.push({x:enemy.x,y:enemy.y,glyph:"!",type:"potion"});
- if(enemy.kind==="dragon"){player.dragonSlainLastFloor=true;addLog("The dragon's death cry echoes through the depths...","death");}
+ if(enemy.kind==="dragon"){player.dragonSlainLastFloor=true;addLog("The dragon's death cry echoes...","death");}
  if(enemy.secret){player.secretKills++;player.statPoints+=2;addLog("SECRET BOSS DEFEATED! +2 stat points.","level");grantRelic(enemy.kind);}
  fx({kind:"enemyDeath",x:enemy.x,y:enemy.y});
  removeEnemy(enemy);
  if(enemy.final){state="win";endReason="You have slain Tiamat, the Dragon Queen! (For now... the true Weapons still slumber.)";fx({kind:"level"});}
 }
 
-// ---------- Combat ----------
-function lifesteal(dmg){
- if(player.skills.p_vampire&&dmg>0){const h=Math.max(1,Math.round(dmg*0.08));player.hp=Math.min(player.maxhp,player.hp+h);}
-}
+// ---------- Combat (staff now powers spells; rogue crit spec) ----------
+function lifesteal(dmg){if(player.skills.p_vampire&&dmg>0){const h=Math.max(1,Math.round(dmg*0.08));player.hp=Math.min(player.maxhp,player.hp+h);}}
 function playerAttack(target,opts){
  opts=opts||{};const mult=opts.mult||1;
  const roll1=die(20);let attackRoll=roll1;
@@ -443,37 +433,47 @@ function playerAttack(target,opts){
   let base=rollDice(player.weapon.dice||1,player.weapon.die)+weaponBonus()+primaryMod();
   if(opts.extraDie)base+=rollDice(1,opts.extraDie);
   let dmg=base*mult;
-  if(crit)dmg+=rollDice(player.weapon.dice||1,player.weapon.die);
+  if(crit)dmg+=rollDice((player.weapon.dice||1)+(player.classIndex===2?CONFIG.rogue.critExtraDice:0),player.weapon.die);
   dmg=Math.max(1,Math.round(dmg*totalDamagePct()));
-  target.hp-=dmg;
-  lifesteal(dmg);
+  target.hp-=dmg;lifesteal(dmg);
   addLog("You "+(crit?"CRIT":"hit")+" "+target.name+" for "+dmg+" damage.",crit?"crit":"hit");
   fx({kind:"enemyHit",x:target.x,y:target.y,amount:dmg,crit,slash:true});
   if(target.hp<=0)awardKill(target);
  }else{addLog("You miss the "+target.name+".","miss");fx({kind:"miss",x:target.x,y:target.y});}
 }
+// Spell base = STAFF dice + staff bonus + INT mod (staff matters!)
 function spellHit(target,mult){
  const roll=die(20);
  if(roll===1){addLog("The spell fizzles!","miss");fx({kind:"spell",x:target.x,y:target.y,hit:false});return;}
  const total=roll+abilityMod(player.int)+proficiency();
  const crit=isCritRoll(roll);
  if(crit||total>=target.ac){
-  let dmg=(rollDice(1,10)+abilityMod(player.int))*mult;
-  if(crit)dmg+=rollDice(1,10);
+  let dmg=(rollDice(player.weapon.dice||1,player.weapon.die)+weaponBonus()+abilityMod(player.int))*mult;
+  if(crit)dmg+=rollDice(player.weapon.dice||1,player.weapon.die);
   dmg=Math.max(1,Math.round(dmg*totalDamagePct()));
-  target.hp-=dmg;
-  lifesteal(dmg);
+  target.hp-=dmg;lifesteal(dmg);
   addLog("Arcane fire scorches "+target.name+" for "+dmg+" damage.",crit?"crit":"hit");
   fx({kind:"spell",x:target.x,y:target.y,amount:dmg,crit,hit:true});
   if(target.hp<=0)awardKill(target);
  }else{addLog("The spell misses "+target.name+".","miss");fx({kind:"spell",x:target.x,y:target.y,hit:false});}
 }
 function useAbility(targetOverride){
- if(player.abilityUses<=0){addLog("No ability uses remain.");return false;}
- if(player.classIndex===1){player.abilityUses--;const heal=rollDice(1,10)+player.level;player.hp=Math.min(player.maxhp,player.hp+heal);addLog("Second Wind restores "+heal+" HP.","heal");fx({kind:"heal",amount:heal});return true;}
- if(player.classIndex===2){const t=adjacentEnemy();if(!t){addLog("Sneak Strike requires an adjacent enemy.");return false;}player.abilityUses--;playerAttack(t,{advantage:true,extraDie:6});return true;}
- if(player.classIndex===3){const t=targetOverride||nearestEnemy(8)[0];if(!t){addLog("Firebolt needs a target within 8 tiles.");return false;}player.abilityUses--;spellHit(t,1);return true;}
- return false;
+ if(player.classIndex===1){
+  if(player.abilityUses<=0){addLog("No ability uses remain.");return false;}
+  player.abilityUses--;const heal=rollDice(1,10)+player.level;player.hp=Math.min(player.maxhp,player.hp+heal);
+  addLog("Second Wind restores "+heal+" HP.","heal");fx({kind:"heal",amount:heal});return true;
+ }
+ if(player.classIndex===2){
+  if(player.abilityUses<=0){addLog("No ability uses remain.");return false;}
+  const t=adjacentEnemy();if(!t){addLog("Sneak Strike requires an adjacent enemy.");return false;}
+  player.abilityUses--;playerAttack(t,{advantage:true,extraDie:6});return true;
+ }
+ // Wizard: MP-based Firebolt
+ const cost=CONFIG.mp.fireboltCost;
+ if(num(player.mp,0)<cost){addLog("Not enough MP ("+cost+" needed).","miss");return false;}
+ const t=targetOverride||nearestEnemy(8)[0];
+ if(!t){addLog("Firebolt needs a target within 8 tiles.");return false;}
+ player.mp-=cost;spellHit(t,1);return true;
 }
 
 // ---------- Map gen ----------
@@ -489,11 +489,12 @@ function generateMap(floor){
   player.x=px;player.y=py;
 
   if(floor<MAX_FLOOR){const[sx,sy]=findFree(10);map[sy][sx]="+";stairs={x:sx,y:sy};}
-  const[mx,my]=findFree(6);merchant={x:mx,y:my};
+  const[mx,my]=findFree(6);
+  merchant={x:mx,y:my,stock:{scroll:random()<CONFIG.stock.scroll,shoes:random()<CONFIG.stock.shoes&&!player.inventory.shoes,wing:random()<CONFIG.stock.wing&&!player.inventory.wing,hp2:random()<CONFIG.stock.hp2}};
   const[ax,ay]=findFree(6);smith={x:ax,y:ay};
 
   const wk=pickSecretKind(floor);
-  if(wk){
+  if(wk&&floor<MAX_FLOOR){
    let chance=CONFIG.portal.base;
    if(player.gold>=CONFIG.portal.greedGold)chance+=CONFIG.portal.greedBonus;
    if(dragonEcho)chance+=CONFIG.portal.dragonEcho;
@@ -501,7 +502,7 @@ function generateMap(floor){
   }
 
   const enemyCount=Math.min(4+Math.floor(floor/5),9);
-  for(let i=1;i<=enemyCount;i++){const[x,y]=findFree(5);spawnEnemy(randomEnemyKind(floor),x,y);}
+  for(let i=1;i<=enemyCount;i++){const[x,y]=findFree(6);spawnEnemy(randomEnemyKind(floor),x,y);}
   if(floor===MAX_FLOOR){const[x,y]=findFree(8);spawnEnemy("tiamat",x,y);}
 
   for(let i=1;i<=2;i++){const[x,y]=findFree(0);items.push({x,y,glyph:"!",type:"potion"});}
@@ -514,7 +515,8 @@ function generateMap(floor){
   map=[];for(let y=1;y<=HEIGHT;y++){map[y]=[];for(let x=1;x<=WIDTH;x++)map[y][x]=(x===1||y===1||x===WIDTH||y===HEIGHT)?"#":".";}
   player.x=2;player.y=HEIGHT-2;enemies=[];items=[];stairs=null;merchant=null;smith=null;portal=null;
   if(floor<MAX_FLOOR){stairs={x:WIDTH-2,y:2};map[stairs.y][stairs.x]="+";}
-  merchant={x:6,y:HEIGHT-3};smith={x:8,y:HEIGHT-3};
+  merchant={x:6,y:HEIGHT-3,stock:{scroll:false,shoes:false,wing:false,hp2:true}};
+  smith={x:8,y:HEIGHT-3};
   spawnEnemy(randomEnemyKind(floor),WIDTH-4,HEIGHT-3);
   spawnEnemy(randomEnemyKind(floor),WIDTH-3,4);
   if(floor===MAX_FLOOR)spawnEnemy("tiamat",WIDTH-3,3);
@@ -522,21 +524,23 @@ function generateMap(floor){
   items.push({x:5,y:4,glyph:"$",type:"gold",amount:5});
  }
  meta.deepestFloor=Math.max(meta.deepestFloor,floor);
- if(floor===MAX_FLOOR)addLog("Floor 100: TIAMAT, the Dragon Queen, coils in the dark.");
- else addLog("Floor "+floor+": stairs (+), merchant (M), smith (A)."+(portal?" A terrible presence hums (?).":""));
+ player.grace=1;
+ if(floor===MAX_FLOOR)addLog("Floor 100: TIAMAT coils in the dark.");
+ else addLog("Floor "+floor+": stairs(+), merchant(M), smith(A)."+(portal?" A terrible presence hums (?).":""));
 }
 
 // ---------- Actions ----------
 function descendFloor(){
  player.floor++;player.abilityUses=player.abilityMax;
  const heal=rollDice(1,4);player.hp=Math.min(player.maxhp,player.hp+heal);
- addLog("You descend to floor "+player.floor+" (+"+heal+" HP).","heal");
+ if(player.classIndex===3){const pct=randInt(CONFIG.mp.restoreMin,CONFIG.mp.restoreMax);const g=Math.round(player.maxmp*pct/100);player.mp=Math.min(player.maxmp,player.mp+g);addLog("You descend to floor "+player.floor+" (+"+heal+" HP, +"+g+" MP).","heal");}
+ else addLog("You descend to floor "+player.floor+" (+"+heal+" HP).","heal");
  boardWrap.classList.add("board-enter");setTimeout(()=>boardWrap.classList.remove("board-enter"),500);
  generateMap(player.floor);
 }
 function pickupItemAt(x,y){
  const item=itemAt(x,y);if(!item)return;
- if(item.type==="potion"){player.potions++;addLog("You pick up a healing potion (!).","heal");fx({kind:"itemFloat",text:"+potion"});}
+ if(item.type==="potion"){player.inventory.hp1++;addLog("You pick up a healing potion (!).","heal");fx({kind:"itemFloat",text:"+potion"});}
  else{player.gold+=item.amount;addLog("You collect "+item.amount+" gold ($).","gold");fx({kind:"gold",amount:item.amount});}
  const i=items.indexOf(item);if(i!==-1)items.splice(i,1);
 }
@@ -549,37 +553,84 @@ function triggerPortal(p){
  addLog("A SECRET WEAPON AWAKENS: "+enemyAt(bx,by).name+"!","death");
  shake();fx({kind:"enemyDeath",x:bx,y:by});
 }
-function tryMove(dx,dy){
- const nx=player.x+dx,ny=player.y+dy;
- if(!isWalkable(nx,ny)){addLog("A wall blocks your path.");return false;}
- const target=enemyAt(nx,ny);
- if(target){playerAttack(target);return true;}
- player.x=nx;player.y=ny;
+function landTriggers(nx,ny){
  pickupItemAt(nx,ny);
- if(stairs&&nx===stairs.x&&ny===stairs.y&&player.floor<MAX_FLOOR)descendFloor();
+ if(stairs&&nx===stairs.x&&ny===stairs.y&&player.floor<MAX_FLOOR){descendFloor();return true;}
  if(portal&&nx===portal.x&&ny===portal.y){const p=portal;portal=null;triggerPortal(p);}
  if(merchant&&nx===merchant.x&&ny===merchant.y)openShop();
  if(smith&&nx===smith.x&&ny===smith.y)openSmith();
+ return false;
+}
+// one step; second=true means the shoes bonus step (no attacks)
+function stepOnce(dx,dy,second){
+ const nx=player.x+dx,ny=player.y+dy;
+ if(!isWalkable(nx,ny))return false;
+ const target=enemyAt(nx,ny);
+ if(target){if(second)return false;playerAttack(target);return "attack";}
+ player.x=nx;player.y=ny;
+ landTriggers(nx,ny);
+ return "moved";
+}
+function tryMove(dx,dy){
+ const first=stepOnce(dx,dy,false);
+ if(!first){addLog("A wall blocks your path.");return false;}
+ if(first==="moved"&&player.inventory.shoesEq){stepOnce(dx,dy,true);}
  return true;
 }
-function drinkPotion(){
- if(player.potions<=0){addLog("You have no potions.");return false;}
- player.potions--;
- const heal=rollDice(2,4)+Math.max(0,abilityMod(player.con));
- player.hp=Math.min(player.maxhp,player.hp+heal);
- addLog("You drink a potion and recover "+heal+" HP.","heal");
- fx({kind:"heal",amount:heal});
+function drinkHp(best){
+ const inv=player.inventory;
+ if(best&&inv.hp2>0){inv.hp2--;const heal=rollDice(4,8)+Math.max(0,abilityMod(player.con))*2;player.hp=Math.min(player.maxhp,player.hp+heal);addLog("Greater potion restores "+heal+" HP.","heal");fx({kind:"heal",amount:heal});return true;}
+ if(inv.hp1>0){inv.hp1--;const heal=rollDice(2,4)+Math.max(0,abilityMod(player.con));player.hp=Math.min(player.maxhp,player.hp+heal);addLog("Potion restores "+heal+" HP.","heal");fx({kind:"heal",amount:heal});return true;}
+ if(inv.hp2>0){inv.hp2--;const heal=rollDice(4,8)+Math.max(0,abilityMod(player.con))*2;player.hp=Math.min(player.maxhp,player.hp+heal);addLog("Greater potion restores "+heal+" HP.","heal");fx({kind:"heal",amount:heal});return true;}
+ addLog("No healing potions.","miss");return false;
+}
+function drinkMp(){
+ const inv=player.inventory;
+ if(inv.mp<=0){addLog("No MP potions.","miss");return false;}
+ if(player.classIndex!==3){addLog("Only casters use MP.");return false;}
+ inv.mp--;const g=Math.round(player.maxmp*0.5);player.mp=Math.min(player.maxmp,player.mp+g);
+ addLog("MP potion restores "+g+" MP.","heal");fx({kind:"heal",amount:g});return true;
+}
+function useScroll(){
+ const inv=player.inventory;
+ if(inv.scroll<=0){addLog("No scrolls.","miss");return false;}
+ if(player.floor>=MAX_FLOOR){addLog("The scroll crumbles — nowhere deeper.");return false;}
+ inv.scroll--;addLog("The scroll tears reality — you skip a floor!","level");
+ descendFloor();return true;
+}
+function armWing(){
+ const inv=player.inventory;
+ if(!inv.wing){addLog("You own no Holy Wing.","miss");return false;}
+ if(player.wingCd>0){addLog("Holy Wing recharging ("+player.wingCd+" turns).","miss");return false;}
+ player.flightArmed=true;
+ addLog("Holy Wing unfurls — click a tile within 3 to land.","level");
+ return false; // free action; the landing consumes the turn
+}
+function tryLand(x,y){
+ const d=cheb(player.x,player.y,x,y);
+ if(d<1||d>CONFIG.items.flyRadius){addLog("Too far to fly (max 3).","miss");player.flightArmed=false;render();return false;}
+ if(x<2||x>WIDTH-1||y<2||y>HEIGHT-1||!isWalkable(x,y)||enemyAt(x,y)){addLog("You cannot land there.","miss");player.flightArmed=false;render();return false;}
+ player.x=x;player.y=y;
+ player.flightArmed=false;player.wingCd=CONFIG.items.wingCd;
+ addLog("You soar across the crypt!","level");
+ fx({kind:"level"});
+ landTriggers(x,y);
  return true;
 }
 
-// ---------- Merchant ----------
+// ---------- Merchant (random stock) ----------
 function buildEntries(){
- const e=[];
- for(const w of SHOP_WEAPONS)if(w.tier>player.weapon.tier)e.push({id:"weapon"+w.tier,label:w.name+" ("+w.dice+"d"+w.die+"+"+w.bonus+")",cost:w.cost,apply:()=>{player.weapon={name:w.name,die:w.die,dice:w.dice,bonus:w.bonus,enhance:0,tier:w.tier};addLog("You equip the "+w.name+"!","shop");}});
- e.push({id:"potion",label:"Healing Potion",cost:15,apply:()=>{player.potions++;addLog("You buy a healing potion.","shop");}});
- if(player.trainHp<3)e.push({id:"tough",label:"Toughness Training (+3 Max HP)",cost:25+player.trainHp*10,apply:()=>{player.trainHp++;player.maxhp+=3;player.hp+=3;addLog("You feel tougher (+3 max HP).","shop");}});
- if(player.trainAc<2)e.push({id:"plate",label:"Armor Plating (+1 AC)",cost:30+player.trainAc*15,apply:()=>{player.trainAc++;player.ac++;addLog("Your armor improves (+1 AC).","shop");}});
- if(player.trainFocus<1)e.push({id:"focus",label:"Focus Study (+1 Ability Use)",cost:40,apply:()=>{player.trainFocus++;player.abilityMax++;player.abilityUses++;addLog("Your focus deepens.","shop");}});
+ const e=[];const P=CONFIG.prices;
+ for(const w of SHOP_WEAPONS)if(w.tier>player.weapon.tier)e.push({label:w.name+" ("+w.dice+"d"+w.die+"+"+w.bonus+")",cost:w.cost,apply:()=>{player.weapon={name:w.name,die:w.die,dice:w.dice,bonus:w.bonus,enhance:0,tier:w.tier};addLog("You equip the "+w.name+"!","shop");}});
+ e.push({label:"Healing Potion",cost:P.hp1,apply:()=>{player.inventory.hp1++;addLog("You buy a healing potion.","shop");}});
+ if(merchant.stock.hp2)e.push({label:"Greater Healing Potion (4d8)",cost:P.hp2,apply:()=>{player.inventory.hp2++;addLog("You buy a greater potion.","shop");}});
+ if(player.classIndex===3)e.push({label:"MP Potion (50% MP)",cost:P.mp,apply:()=>{player.inventory.mp++;addLog("You buy an MP potion.","shop");}});
+ if(merchant.stock.scroll)e.push({label:"Scroll: Skip Floor (one use)",cost:P.scroll,apply:()=>{player.inventory.scroll++;addLog("You buy a floor-skip scroll.","shop");}});
+ if(merchant.stock.shoes)e.push({label:"Swift Shoes (2 tiles/turn)",cost:P.shoes,apply:()=>{player.inventory.shoes=true;addLog("You buy Swift Shoes! Equip in Inventory (I).","shop");}});
+ if(merchant.stock.wing)e.push({label:"Holy Wing (fly ≤3, 20t CD)",cost:P.wing,apply:()=>{player.inventory.wing=true;addLog("You buy the Holy Wing!","shop");}});
+ if(player.trainHp<3)e.push({label:"Toughness Training (+3 Max HP)",cost:25+player.trainHp*10,apply:()=>{player.trainHp++;player.maxhp+=3;player.hp+=3;addLog("You feel tougher.","shop");}});
+ if(player.trainAc<2)e.push({label:"Armor Plating (+1 AC)",cost:30+player.trainAc*15,apply:()=>{player.trainAc++;player.ac++;addLog("Your armor improves.","shop");}});
+ if(player.trainFocus<1)e.push({label:"Focus Study (+1 Ability Use)",cost:40,apply:()=>{player.trainFocus++;player.abilityMax++;player.abilityUses++;addLog("Your focus deepens.","shop");}});
  return e;
 }
 function openShop(){shopOpen=true;clearHold();addLog("The merchant bows: \"Browse, hero...\"","shop");renderShop();shopOverlay.classList.remove("hidden");}
@@ -594,27 +645,25 @@ function tryBuyIndex(i){
  if(player.gold<en.cost){addLog("Not enough gold.","miss");renderShop();return;}
  player.gold-=en.cost;en.apply();fx({kind:"goldSpend",amount:en.cost});renderShop();render();persist("run");
 }
-function tryBuyById(id){const es=buildEntries();const i=es.findIndex(x=>x.id===id);if(i!==-1&&player.gold>=es[i].cost)tryBuyIndex(i);}
 function autoShop(){
- if(player.potions<2)tryBuyById("potion");
+ const es=buildEntries();
+ if(player.inventory.hp1<2){const i=es.findIndex(x=>x.label.startsWith("Healing Potion"));if(i>-1&&player.gold>=es[i].cost)tryBuyIndex(i);}
  const nw=SHOP_WEAPONS.find(w=>w.tier===player.weapon.tier+1);
- if(nw&&player.gold>=nw.cost+20)tryBuyById("weapon"+nw.tier);
+ if(nw&&player.gold>=nw.cost+20){const i=es.findIndex(x=>x.label.startsWith(nw.name));if(i>-1)tryBuyIndex(i);}
  closeShop();
 }
 
-// ---------- Blacksmith (+1..+20, raw + %) ----------
+// ---------- Blacksmith ----------
 function enhanceCost(plus){return Math.round(CONFIG.enhance.costBase*Math.pow(CONFIG.enhance.costGrowth,plus));}
-function openSmith(){smithOpen=true;clearHold();addLog("The blacksmith raises a hammer: \"More edge?\"","shop");renderSmith();smithOverlay.classList.remove("hidden");}
+function openSmith(){smithOpen=true;clearHold();addLog("The blacksmith raises a hammer.","shop");renderSmith();smithOverlay.classList.remove("hidden");}
 function closeSmith(){smithOpen=false;smithOverlay.classList.add("hidden");}
 function renderSmith(){
- smithGold.textContent="Your gold: "+player.gold+" · Weapon: "+player.weapon.name+" +"+player.weapon.enhance;
+ smithGold.textContent="Gold "+player.gold+" · "+player.weapon.name+" +"+player.weapon.enhance+" ("+player.weapon.dice+"d"+player.weapon.die+" +"+weaponBonus()+" raw, +"+(player.weapon.enhance*CONFIG.enhance.pctPerPlus)+"% all dmg)";
  const plus=player.weapon.enhance;
  if(plus<CONFIG.enhance.max){
   const cost=enhanceCost(plus);
-  smithList.innerHTML='<button class="shop-item" data-smith="enh" '+(player.gold<cost?"disabled":"")+'><span>1) Enhance → +'+(plus+1)+" (+"+CONFIG.enhance.rawPerPlus+" raw, +"+CONFIG.enhance.pctPerPlus+"% dmg)</span>"+'<span class="si-cost">'+cost+"g</span></button>";
- }else{
-  smithList.innerHTML='<p class="hint">This blade has reached its legend: +20.</p>';
- }
+  smithList.innerHTML='<button class="shop-item" data-smith="enh" '+(player.gold<cost?"disabled":"")+'><span>1) Enhance → +'+(plus+1)+" (+"+CONFIG.enhance.rawPerPlus+" raw, +"+CONFIG.enhance.pctPerPlus+"% phys & spell)</span>"+'<span class="si-cost">'+cost+"g</span></button>";
+ }else smithList.innerHTML='<p class="hint">This blade has reached its legend: +20.</p>';
 }
 function tryEnhance(){
  const plus=player.weapon.enhance;
@@ -623,13 +672,40 @@ function tryEnhance(){
  if(player.gold<cost){addLog("Not enough gold.","miss");renderSmith();return;}
  player.gold-=cost;player.weapon.enhance++;
  addLog("The hammer sings: "+player.weapon.name+" +"+player.weapon.enhance+"!","shop");
- fx({kind:"goldSpend",amount:cost});
  renderSmith();render();persist("run");
 }
 function autoSmith(){
  const plus=player.weapon.enhance;
  if(plus<CONFIG.enhance.max&&player.gold>=enhanceCost(plus)+60)tryEnhance();
  closeSmith();
+}
+
+// ---------- Inventory ----------
+function openInv(){invOpen=true;renderInv();invOverlay.classList.remove("hidden");}
+function closeInv(){invOpen=false;invOverlay.classList.add("hidden");}
+function renderInv(){
+ const inv=player.inventory;
+ const rows=[
+  {label:"Healing Potion x"+inv.hp1+" (2d4+CON)",act:"hp1"},
+  {label:"Greater Healing Potion x"+inv.hp2+" (4d8+2×CON)",act:"hp2"},
+  {label:"MP Potion x"+inv.mp+" (50% MP)",act:"mp"},
+  {label:"Scroll: Skip Floor x"+inv.scroll,act:"scroll"},
+  {label:"Swift Shoes — "+(inv.shoes?(inv.shoesEq?"EQUIPPED":"unequipped"):"not owned")+" (2 tiles/turn)",act:"shoes"},
+  {label:"Holy Wing — "+(inv.wing?(player.wingCd>0?"recharging "+player.wingCd:"READY (G)"):"not owned")+" (fly ≤3 over anything)",act:"wing"},
+ ];
+ invList.innerHTML=rows.map((r,i)=>'<button class="shop-item" data-inv="'+r.act+'"><span>'+(i+1)+") "+escapeHtml(r.label)+"</span>"+'<span class="si-cost">use</span></button>').join("");
+}
+function invAction(act){
+ const inv=player.inventory;
+ let consumed=true;
+ if(act==="hp1")consumed=drinkHp(false);
+ else if(act==="hp2")consumed=drinkHp(true);
+ else if(act==="mp")consumed=drinkMp();
+ else if(act==="scroll")consumed=useScroll();
+ else if(act==="shoes"){if(!inv.shoes){addLog("You own no shoes.","miss");consumed=false;}else{inv.shoesEq=!inv.shoesEq;addLog(inv.shoesEq?"Swift Shoes equipped.":"Swift Shoes unequipped.","shop");consumed=false;}}
+ else if(act==="wing")consumed=armWing();
+ renderInv();render();persist("run");
+ return consumed;
 }
 
 // ---------- Commands ----------
@@ -642,8 +718,10 @@ function processCommand(cmd){
  if(cmd==="d"||cmd==="l"||cmd==="6"||cmd==="e")return tryMove(1,0);
  if(cmd==="."||cmd==="5"){addLog("You wait a moment.");return true;}
  if(cmd==="x"){player.defending=true;addLog("You raise your guard (+2 AC until next turn).");return true;}
- if(cmd==="q")return drinkPotion();
+ if(cmd==="q")return drinkHp(false);
+ if(cmd==="r")return drinkMp();
  if(cmd==="f")return useAbility();
+ if(cmd==="g")return armWing();
  if(cmd==="b"){if(merchant&&player.x===merchant.x&&player.y===merchant.y){openShop();return true;}addLog("No merchant within reach.");return false;}
  if(cmd==="v"){if(smith&&player.x===smith.x&&player.y===smith.y){openSmith();return true;}addLog("No blacksmith within reach.");return false;}
  if(cmd===">"){if(stairs&&player.x===stairs.x&&player.y===stairs.y&&player.floor<MAX_FLOOR){descendFloor();return true;}addLog("There is no usable stair here.");return false;}
@@ -664,7 +742,7 @@ function enemyAttack(enemy){
   player.hp-=dmg;
   addLog(enemy.name+" hits you for "+dmg+" damage.","hurt");
   fx({kind:"playerHit",amount:dmg});
-  if(player.hp<=0){player.hp=0;player.deaths=(player.deaths||0)+1;meta.deaths=(meta.deaths||0)+1;addLog(enemy.name+" strikes you down on floor "+player.floor+"...","hurt");}
+  if(player.hp<=0){player.hp=0;player.deaths=num(player.deaths,0)+1;meta.deaths=(meta.deaths||0)+1;addLog(enemy.name+" strikes you down on floor "+player.floor+"...","hurt");}
  }else{addLog(enemy.name+" misses you.","miss");fx({kind:"playerMiss"});}
 }
 function enemyTurn(enemy){
@@ -682,7 +760,8 @@ function enemiesAct(){for(const e of enemies){if(e.hp>0)enemyTurn(e);if(state!==
 
 function performRevive(){
  deathOverlay.classList.add("hidden");endOverlay.classList.add("hidden");classOverlay.classList.add("hidden");hudEl.classList.remove("hidden");
- player.floor=1;player.hp=player.maxhp;player.defending=false;
+ player.floor=1;player.hp=player.maxhp;player.defending=false;player.flightArmed=false;
+ if(player.classIndex===3)player.mp=Math.max(player.mp,Math.round(player.maxmp*0.5));
  generateMap(1);
  boardWrap.classList.add("board-enter");setTimeout(()=>boardWrap.classList.remove("board-enter"),500);
  state="play";
@@ -695,7 +774,7 @@ function performRevive(){
 function autoCommand(){
  if(player.hp<=Math.floor(player.maxhp*0.35)){
   if(player.slots.includes("a_heal")&&!(player.cd["a_heal"]>0))return"1";
-  if(player.potions>0)return"q";
+  if(player.inventory.hp1>0||player.inventory.hp2>0)return"q";
  }
  const adj=adjacentEnemy();
  if(adj){
@@ -705,7 +784,7 @@ function autoCommand(){
  }
  if(player.classIndex===1&&player.abilityUses>0&&player.hp<=Math.floor(player.maxhp*0.45))return"f";
  if(player.classIndex===2&&player.abilityUses>0&&adj)return"f";
- if(player.classIndex===3&&player.abilityUses>0){const[t,d]=nearestEnemy(8);if(t&&d>1)return"f";}
+ if(player.classIndex===3&&num(player.mp,0)>=CONFIG.mp.fireboltCost){const[t,d]=nearestEnemy(8);if(t&&d>1)return"f";}
  if(adj){if(adj.x<player.x)return"h";if(adj.x>player.x)return"l";if(adj.y<player.y)return"k";if(adj.y>player.y)return"j";}
  let tx=null,ty=null;
  if(player.floor<MAX_FLOOR&&stairs){tx=stairs.x;ty=stairs.y;}
@@ -735,7 +814,7 @@ function autoCommand(){
  return".";
 }
 function autoLearn(){
- if(!player||player.skillPoints<=0)return;
+ if(!player||num(player.skillPoints,0)<=0)return;
  for(const id of SKILL_ORDER){
   const s=SKILLS[id];
   if(!player.skills[id]&&(!s.req||player.skills[s.req])&&player.skillPoints>=s.cost){learnSkill(id);return;}
@@ -792,7 +871,6 @@ function playFx(){
  }
  fxQueue=[];
 }
-
 function relicList(){
  const r=[];
  if(player.relics.sapphire)r.push("Sapphire Ring");
@@ -805,7 +883,7 @@ function relicList(){
 function slotLabel(i){
  const id=player.slots[i];
  if(!id)return "["+(i===0?1:3)+"] —";
- const cd=player.cd[id]||0;
+ const cd=num(player.cd[id],0);
  return "["+(i===0?1:3)+"] "+SKILLS[id].name+(cd>0?" ("+cd+")":"");
 }
 
@@ -815,7 +893,7 @@ function render(){
   $("hudTurn").textContent="⏳ Turn "+Math.min(turn+1,MAX_TURNS);
   $("hudClass").textContent="🎭 "+player.className+" Lv"+player.level;
   $("hudPts").textContent="📜 Pts "+player.statPoints;
-  $("hudSkillPts").textContent="🌟 Sk "+player.skillPoints;
+  $("hudSkillPts").textContent="🌟 Sk "+num(player.skillPoints,0);
   const pct=Math.max(0,Math.min(100,(player.hp/player.maxhp)*100));
   hpFill.style.width=pct+"%";
   hpFill.style.background=pct>50?"linear-gradient(90deg,#66bb6a,#9ccc65)":pct>25?"linear-gradient(90deg,#ffa726,#ffca28)":"linear-gradient(90deg,#e53935,#ff5252)";
@@ -823,15 +901,21 @@ function render(){
   $("hudAc").textContent="🛡 AC "+player.ac;
   $("hudXp").textContent="✨ XP "+player.xp+"/"+player.xpNext;
   $("hudDmg").textContent="💥 x"+totalDamagePct().toFixed(2);
-  $("hudWeapon").textContent="⚔ "+player.weapon.name+" +"+player.weapon.enhance+" ("+player.weapon.dice+"d"+player.weapon.die+"+"+weaponBonus()+")";
+  if(player.classIndex===3){
+   mpRow.classList.remove("hidden");
+   mpFill.style.width=Math.max(0,Math.min(100,(player.mp/player.maxmp)*100))+"%";
+   $("hudMp").textContent="MP "+player.mp+"/"+player.maxmp;
+  }else mpRow.classList.add("hidden");
+  $("hudWeapon").textContent="⚔ "+player.weapon.name+" +"+player.weapon.enhance+" "+player.weapon.dice+"d"+player.weapon.die+"+"+weaponBonus()+" (avg~"+weaponAvg()+")";
   $("hudStats").textContent="S"+player.str+" D"+player.dex+" C"+player.con+" I"+player.int;
   $("hudGold").textContent="💰 "+player.gold;
-  $("hudPotions").textContent="🧪 "+player.potions;
-  $("hudAbility").textContent="🔮 "+player.abilityName+" "+player.abilityUses+"/"+player.abilityMax;
+  $("hudPotions").textContent="🧪 "+player.inventory.hp1+"/"+player.inventory.hp2+" · MP🧪"+player.inventory.mp+" · 📜"+player.inventory.scroll;
+  $("hudAbility").textContent=player.classIndex===3?("🔮 Firebolt "+CONFIG.mp.fireboltCost+"MP"):("🔮 "+player.abilityName+" "+player.abilityUses+"/"+player.abilityMax);
   $("hudSkills").textContent="🎯 "+slotLabel(0)+" · "+slotLabel(1);
   $("hudKills").textContent="⚔ Kills "+player.kills;
-  $("hudDeaths").textContent="💀 "+(player.deaths||0);
+  $("hudDeaths").textContent="💀 "+num(player.deaths,0);
   $("hudRelics").textContent="🔮 Relics: "+relicList();
+  boardEl.classList.toggle("flight-mode",!!player.flightArmed);
  }
  const grid=[];
  for(let y=1;y<=HEIGHT;y++){grid[y]=[];for(let x=1;x<=WIDTH;x++)grid[y][x]=(map[y]&&map[y][x])?map[y][x]:" ";}
@@ -848,6 +932,7 @@ function render(){
   let cls="cell "+classFor(ch);
   if(ch==="."||ch===" ")cls+=((x+y)%2===0)?" cb-a":" cb-b";
   if(ch==="#")cls+=" wallbg";
+  if(player&&player.flightArmed&&ch!=="#"&&!(x===player.x&&y===player.y)&&cheb(player.x,player.y,x,y)<=CONFIG.items.flyRadius&&x>=2&&x<=WIDTH-1&&y>=2&&y<=HEIGHT-1)cls+=" fly-ok";
   html+='<span class="'+cls+'">'+(ch===" "?"&nbsp;":escapeHtml(ch))+"</span>";
  }
  boardEl.innerHTML=html;
@@ -858,17 +943,19 @@ function render(){
 function doPlayerTurn(cmdOrAction){
  if(state!=="play")return;
  player.defending=false;
- if(player.cd)for(const k in player.cd)if(player.cd[k]>0)player.cd[k]--;
+ if(player.cd)for(const k in player.cd)if(num(player.cd[k],0)>0)player.cd[k]--;
+ if(num(player.wingCd,0)>0)player.wingCd--;
  if(player.relics.emerald&&player.hp<player.maxhp)player.hp=Math.min(player.maxhp,player.hp+2);
  const consumed=(typeof cmdOrAction==="function")?cmdOrAction():processCommand(cmdOrAction);
  if(!consumed){addLog("That action did nothing.");render();return;}
  turn++;
  if(state!=="play"){finish();render();playFx();return;}
- enemiesAct();
+ if(player.grace>0){player.grace--;addLog("The room holds its breath...","miss");}
+ else enemiesAct();
  if(player.hp<=0){
   state="dead";clearHold();
   deathReason.textContent="The Crypt claims your body — not your legend.";
-  deathInfo.textContent="Everything is kept. Deaths: "+player.deaths+" · You rise at Floor 1.";
+  deathInfo.textContent="Everything is kept. Deaths: "+num(player.deaths,0)+" · You rise at Floor 1.";
   deathOverlay.classList.remove("hidden");
   flashVignette("v-hurt");shake();
   persist("run");render();playFx();
@@ -880,7 +967,7 @@ function doPlayerTurn(cmdOrAction){
 }
 
 function startGame(ci){
- closeShop();closeSmith();closeStats();closeSkills();closeSaves();clearHold();
+ closeAll();clearHold();
  deathOverlay.classList.add("hidden");
  createPlayer(ci);turn=0;logMessages=[];endReason="";state="play";
  activeSlot=String(Date.now());
@@ -891,20 +978,20 @@ function startGame(ci){
  render();persist("run");
 }
 function finish(){
- stopAuto();clearHold();closeShop();closeSmith();closeStats();closeSkills();closeSaves();
+ stopAuto();clearHold();closeAll();
  meta.bestScore=Math.max(meta.bestScore,finalScore());
  meta.deepestFloor=Math.max(meta.deepestFloor,player.floor);
  if(state==="win")meta.wins+=1;
  $("endTitle").textContent=state==="win"?"VICTORY!":"GAME OVER";
  $("endReason").textContent=endReason;
  $("endScore").textContent="Final score: "+finalScore()+"  (Best: "+meta.bestScore+")";
- $("endStats").textContent=player.className+" Lv"+player.level+" | Floor "+player.floor+"/"+MAX_FLOOR+" | Kills "+player.kills+" | Secrets "+player.secretKills+" | 💀 "+(player.deaths||0)+" | "+player.weapon.name+" +"+player.weapon.enhance;
+ $("endStats").textContent=player.className+" Lv"+player.level+" | Floor "+player.floor+"/"+MAX_FLOOR+" | Kills "+player.kills+" | Secrets "+player.secretKills+" | 💀 "+num(player.deaths,0)+" | "+player.weapon.name+" +"+player.weapon.enhance;
  endOverlay.classList.remove("hidden");
  if(state==="win")flashVignette("v-gold");
  persist(state==="win"?"victorious":"run");
 }
 function toTitle(){
- stopAuto();clearHold();closeShop();closeSmith();closeStats();closeSkills();closeSaves();
+ stopAuto();clearHold();closeAll();
  deathOverlay.classList.add("hidden");
  state="title";player=null;
  endOverlay.classList.add("hidden");hudEl.classList.add("hidden");classOverlay.classList.remove("hidden");
@@ -924,7 +1011,7 @@ function beginHold(cmd){
  clearHold();heldCmd=cmd;
  holdTimeout=setTimeout(()=>{
   holdInterval=setInterval(()=>{
-   if(state==="play"&&!shopOpen&&!smithOpen&&!statOpen&&!skillOpen&&!savesOpen&&!autoMode)doPlayerTurn(cmd);
+   if(state==="play"&&!shopOpen&&!smithOpen&&!statOpen&&!skillOpen&&!invOpen&&!savesOpen&&!autoMode)doPlayerTurn(cmd);
    else clearHold();
   },CONFIG.speed.holdInterval/speedMult);
  },CONFIG.speed.holdDelay/speedMult);
@@ -957,28 +1044,29 @@ function startAuto(){
  autoMode=true;autoButton.textContent=" Stop Auto-Play";
  autoTimer=setInterval(autoTick,CONFIG.speed.auto/speedMult);
 }
-function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}autoMode=false;autoButton.textContent="▶ Auto-Play Demo";}
+function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}autoMode=false;autoButton.textContent="▶ Auto-Play";}
 
 function mapKeyToCommand(key){
  const k=key.toLowerCase();
  const al={arrowup:"w",arrowdown:"s",arrowleft:"a",arrowright:"d"," ":"."};
  if(al[k])return al[k];
- const v=["w","k","8","n","s","j","2","a","h","4","d","l","6","e",".","5","x","q","f","b","v",">"];
+ const v=["w","k","8","n","s","j","2","a","h","4","d","l","6","e",".","5","x","q","r","f","g","b","v",">"];
  return v.includes(k)?k:null;
 }
 
 boardEl.addEventListener("click",(e)=>{
  const cellEl=e.target.closest(".cell");
- if(!cellEl||state!=="play"||shopOpen||smithOpen||statOpen||skillOpen||savesOpen||autoMode)return;
+ if(!cellEl||state!=="play"||shopOpen||smithOpen||statOpen||skillOpen||invOpen||savesOpen||autoMode)return;
  const idx=Array.prototype.indexOf.call(boardEl.children,cellEl);
  if(idx<0)return;
  const x=idx%WIDTH+1,y=Math.floor(idx/WIDTH)+1;
+ if(player.flightArmed){doPlayerTurn(()=>tryLand(x,y));return;}
  const d=dist(player.x,player.y,x,y);
  const enemy=enemyAt(x,y);
  if(enemy){
   if(d===1)doPlayerTurn(()=>{playerAttack(enemy);return true;});
-  else if(player.slots.includes("a_fireball")&&d<=8&&!(player.cd["a_fireball"]>0))doPlayerTurn(()=>castSkill("a_fireball",enemy));
-  else if(player.classIndex===3&&player.abilityUses>0&&d<=8)doPlayerTurn(()=>useAbility(enemy));
+  else if(player.slots.includes("a_fireball")&&d<=8&&!(num(player.cd["a_fireball"],0)>0))doPlayerTurn(()=>castSkill("a_fireball",enemy));
+  else if(player.classIndex===3&&num(player.mp,0)>=CONFIG.mp.fireboltCost&&d<=8)doPlayerTurn(()=>useAbility(enemy));
   else{addLog("Too far to strike.","miss");render();}
   return;
  }
@@ -1002,6 +1090,13 @@ document.addEventListener("keydown",(event)=>{
   else if(key==="escape"||key==="enter"||key==="v"){closeSmith();render();persist("run");}
   return;
  }
+ if(invOpen){
+  event.preventDefault();
+  const acts=["hp1","hp2","mp","scroll","shoes","wing"];
+  if(key>="1"&&key<="6")invAction(acts[parseInt(key,10)-1]);
+  else if(key==="escape"||key==="i")closeInv();
+  return;
+ }
  if(statOpen){
   event.preventDefault();
   const stats=["str","dex","con","int"];
@@ -1023,6 +1118,7 @@ document.addEventListener("keydown",(event)=>{
 
  if(key==="c"){event.preventDefault();if(autoMode)stopAuto();openStats();return;}
  if(key==="t"){event.preventDefault();if(autoMode)stopAuto();openSkills();return;}
+ if(key==="i"){event.preventDefault();if(autoMode)stopAuto();openInv();return;}
  if(key==="1"){event.preventDefault();if(autoMode)stopAuto();doPlayerTurn(()=>useSlotSkill(0));return;}
  if(key==="3"){event.preventDefault();if(autoMode)stopAuto();doPlayerTurn(()=>useSlotSkill(1));return;}
 
@@ -1045,10 +1141,12 @@ savesList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if
 riseButton.addEventListener("click",performRevive);
 shopList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&!b.disabled)tryBuyIndex(parseInt(b.dataset.idx,10));});
 smithList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&!b.disabled)tryEnhance();});
+invList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&b.dataset.inv)invAction(b.dataset.inv);});
 statList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&!b.disabled&&spendStatPoint(b.dataset.stat)){renderStats();render();}});
 skillList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&!b.disabled&&learnSkill(b.dataset.node)){renderSkills();render();}});
 slot1Button.addEventListener("click",()=>{cycleSlot(0);renderSkills();render();});
 slot2Button.addEventListener("click",()=>{cycleSlot(1);renderSkills();render();});
+$("invButton").addEventListener("click",()=>{if(state==="play"&&!shopOpen&&!smithOpen){if(invOpen)closeInv();else{if(autoMode)stopAuto();openInv();}}});
 $("statButton").addEventListener("click",()=>{if(state==="play"&&!shopOpen&&!smithOpen){if(statOpen)closeStats();else{if(autoMode)stopAuto();openStats();}}});
 $("skillButton").addEventListener("click",()=>{if(state==="play"&&!shopOpen&&!smithOpen){if(skillOpen)closeSkills();else{if(autoMode)stopAuto();openSkills();}}});
 autoButton.addEventListener("click",()=>(autoMode?stopAuto():startAuto()));
@@ -1067,7 +1165,7 @@ eraseButton.addEventListener("click",()=>{
  try{localStorage.removeItem("dnd_meteor_crypt_save_v1");}catch(e){}
  meta={bestScore:0,deepestFloor:0,wins:0,runs:0,deaths:0};
  activeSlot=null;
- stopAuto();clearHold();closeShop();closeSmith();closeStats();closeSkills();closeSaves();
+ stopAuto();clearHold();closeAll();
  deathOverlay.classList.add("hidden");
  state="title";player=null;
  endOverlay.classList.add("hidden");hudEl.classList.add("hidden");classOverlay.classList.remove("hidden");
