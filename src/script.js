@@ -1,9 +1,8 @@
 /* ============================================================
-   DND (Dungeon and dragons) — v7
-   + Multi-slot saves: new class = NEW slot, nothing overwritten
-   + Saves list overlay (resume any expedition)
-   + Speed button 1x/3x/5x (auto-play + hold-walk + FX)
-   + Only "Erase data" can delete anything
+   DND (Dungeon and dragons) — v8
+   + Roguelite death: die → wake at Floor 1, ALL data kept
+   + Visual overhaul: embers, vignettes, checkerboard, glows,
+     HP bar colors, floor transitions, polished UI
    ============================================================ */
 
 function mulberry32(a){return function(){a|=0;a=(a+0x6D2B79F5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
@@ -65,7 +64,7 @@ const SHOP_WEAPONS=[
 let player=null,map=[],enemies=[],items=[],stairs=null,merchant=null,portal=null;
 let logMessages=[],turn=0,state="title",endReason="";
 let autoMode=false,autoTimer=null,shopOpen=false,statOpen=false,savesOpen=false,fxQueue=[];
-let meta={bestScore:0,deepestFloor:0,wins:0,runs:0};
+let meta={bestScore:0,deepestFloor:0,wins:0,runs:0,deaths:0};
 let activeSlot=null;
 let speedMult=1;
 const SPEEDS=[1,3,5];
@@ -79,19 +78,19 @@ statOverlay=document.getElementById("statOverlay"),statList=document.getElementB
 statPts=document.getElementById("statPts"),autoButton=document.getElementById("autoButton"),
 speedButton=document.getElementById("speedButton"),
 eraseButton=document.getElementById("eraseButton"),continueButton=document.getElementById("continueButton"),
-retryButton=document.getElementById("retryButton"),metaLine=document.getElementById("metaLine"),
-savesOverlay=document.getElementById("savesOverlay"),savesList=document.getElementById("savesList");
+metaLine=document.getElementById("metaLine"),
+savesOverlay=document.getElementById("savesOverlay"),savesList=document.getElementById("savesList"),
+deathOverlay=document.getElementById("deathOverlay"),deathReason=document.getElementById("deathReason"),
+deathInfo=document.getElementById("deathInfo"),riseButton=document.getElementById("riseButton"),
+vignetteEl=document.getElementById("vignette"),embersEl=document.getElementById("embers");
 
-// ============================================================
-// SAVE SYSTEM — multi-slot. Only Erase deletes anything.
-// Shape: { meta, slots: { id: runData } }   (legacy {meta,run} auto-migrates)
-// ============================================================
+// ---------- Save system (multi-slot; only Erase deletes) ----------
 function loadSave(){
  try{
   const raw=localStorage.getItem(SAVE_KEY);
   if(!raw)return null;
   const d=JSON.parse(raw);
-  if(!d.slots){ // migrate old single-run format
+  if(!d.slots){
    d.slots={};
    if(d.run)d.slots["legacy"]=Object.assign({created:0,status:"alive"},d.run);
    delete d.run;
@@ -105,12 +104,11 @@ function persist(mode){
   data.meta=meta;
   if(activeSlot){
    const prev=data.slots[activeSlot];
-   if(mode==="run"&&state==="play"&&player){
+   if(mode==="run"&&player){
     data.slots[activeSlot]={player:player,map:map,enemies:enemies,items:items,stairs:stairs,
      merchant:merchant,portal:portal,turn:turn,logMessages:logMessages,
-     created:prev?prev.created:Date.now(),status:"alive"};
-   }else if(prev&&mode==="fallen"){prev.status="fallen";data.slots[activeSlot]=prev;}
-   else if(prev&&mode==="victorious"){prev.status="victorious";data.slots[activeSlot]=prev;}
+     created:prev?prev.created:Date.now(),status:prev&&prev.status==="victorious"?"victorious":"alive"};
+   }else if(prev&&mode==="victorious"){prev.status="victorious";data.slots[activeSlot]=prev;}
   }
   localStorage.setItem(SAVE_KEY,JSON.stringify(data));
  }catch(e){}
@@ -126,9 +124,9 @@ function renderSaves(){
  savesList.innerHTML=ids.map((id,i)=>{
   const r=slots[id],p=r.player;
   if(!p)return"";
-  const tag=r.status==="victorious"?"★ victorious":(r.status==="fallen"?"† fallen":"▶ alive");
+  const tag=r.status==="victorious"?"★ victorious":"▶ delving";
   return '<button class="shop-item" data-slot="'+id+'"><span>'+(i+1)+") Floor "+p.floor+" · "+p.className+
-   " Lv"+p.level+" · HP "+p.hp+"/"+p.maxhp+" · Turn "+(r.turn||0)+"</span>"+
+   " Lv"+p.level+" · HP "+p.hp+"/"+p.maxhp+" · 💀"+(p.deaths||0)+"</span>"+
    '<span class="si-cost">'+tag+"</span></button>";
  }).join("")||'<p class="hint">No saves yet.</p>';
 }
@@ -143,13 +141,14 @@ function continueRun(id){
  turn=r.turn||0;logMessages=r.logMessages||[];
  state="play";
  closeShop();closeStats();closeSaves();clearHold();
- classOverlay.classList.add("hidden");endOverlay.classList.add("hidden");hudEl.classList.remove("hidden");
- addLog(r.status==="fallen"?"You rise again at your last remembered moment.":"You resume your delve.","heal");
+ classOverlay.classList.add("hidden");endOverlay.classList.add("hidden");deathOverlay.classList.add("hidden");hudEl.classList.remove("hidden");
+ addLog("You resume your delve.","heal");
+ if(player.hp<=0){performRevive();return;}
  persist("run");
  render();
 }
 function updateTitleInfo(){
- metaLine.textContent="Best "+meta.bestScore+" · Deepest floor "+meta.deepestFloor+" · Wins "+meta.wins+" · Runs "+meta.runs;
+ metaLine.textContent="Best "+meta.bestScore+" · Deepest "+meta.deepestFloor+" · Wins "+meta.wins+" · Deaths "+(meta.deaths||0)+" · Runs "+meta.runs;
  const n=slotCount();
  if(n>0&&state!=="play"){
   continueButton.classList.remove("hidden");
@@ -200,7 +199,7 @@ function createPlayer(ci){
   hp:c.maxhp,maxhp:c.maxhp,ac:c.ac,str:c.str,dex:c.dex,con:c.con,int:c.int,
   gold:10,potions:2,abilityName:c.abilityName,abilityUses:c.abilityMax,abilityMax:c.abilityMax,
   primary:c.primary,weapon:{name:c.weapon.name,die:c.weapon.die,dice:c.weapon.dice,bonus:c.weapon.bonus,enhance:0,tier:0},
-  trainHp:0,trainAc:0,trainFocus:0,statPoints:0,autoCycle:0,secretKills:0,
+  trainHp:0,trainAc:0,trainFocus:0,statPoints:0,autoCycle:0,secretKills:0,deaths:0,
   relics:{},dragonSlainLastFloor:false,
   defending:false,x:2,y:2,floor:1,kills:0};
 }
@@ -321,6 +320,7 @@ function grantRelic(kind){
  player.relics[d.key]=true;
  d.apply(player);
  addLog("RELIC OBTAINED: "+d.name+" ("+d.desc+")!","level");
+ flashVignette("v-relic");
  fx({kind:"level"});
 }
 function awardKill(enemy){
@@ -432,6 +432,8 @@ function descendFloor(){
  player.floor++;player.abilityUses=player.abilityMax;
  const heal=rollDice(1,4);player.hp=Math.min(player.maxhp,player.hp+heal);
  addLog("You descend to floor "+player.floor+" (+"+heal+" HP).","heal");
+ boardWrap.classList.add("board-enter");
+ setTimeout(()=>boardWrap.classList.remove("board-enter"),500);
  generateMap(player.floor);
 }
 function pickupItemAt(x,y){
@@ -535,11 +537,16 @@ function enemyAttack(enemy){
   player.hp-=dmg;
   addLog(enemy.name+" hits you for "+dmg+" damage.","hurt");
   fx({kind:"playerHit",amount:dmg});
-  if(player.hp<=0){player.hp=0;state="gameover";endReason="You were slain by "+enemy.name+" on floor "+player.floor+".";}
+  if(player.hp<=0){
+   player.hp=0;
+   player.deaths=(player.deaths||0)+1;
+   meta.deaths=(meta.deaths||0)+1;
+   addLog(enemy.name+" strikes you down on floor "+player.floor+"...","hurt");
+  }
  }else{addLog(enemy.name+" misses you.","miss");fx({kind:"playerMiss"});}
 }
 function enemyTurn(enemy){
- if(state!=="play")return;
+ if(state!=="play"||player.hp<=0)return;
  const d=dist(enemy.x,enemy.y,player.x,player.y);
  if(d>(enemy.sight||8))return;
  if(d===1){enemyAttack(enemy);return;}
@@ -550,6 +557,27 @@ function enemyTurn(enemy){
  }
 }
 function enemiesAct(){for(const e of enemies){if(e.hp>0)enemyTurn(e);if(state!=="play")break;}}
+
+// ---------- Roguelite death: back to floor 1, keep everything ----------
+function performRevive(){
+ deathOverlay.classList.add("hidden");
+ endOverlay.classList.add("hidden");
+ classOverlay.classList.add("hidden");
+ hudEl.classList.remove("hidden");
+ player.floor=1;
+ player.hp=player.maxhp;
+ player.defending=false;
+ generateMap(1);
+ boardWrap.classList.add("board-enter");
+ setTimeout(()=>boardWrap.classList.remove("board-enter"),500);
+ state="play";
+ addLog("You awaken at the crypt entrance. Your legend persists.","level");
+ flashVignette("v-gold");
+ fx({kind:"level"});
+ persist("run");
+ render();
+ playFx();
+}
 
 // ---------- Auto AI ----------
 function autoCommand(){
@@ -612,6 +640,11 @@ function cellPos(x,y){return{left:BOARD_PAD+(x-1)*CELL+CELL/2,top:BOARD_PAD+(y-1
 function floatText(x,y,text,cls){const el=document.createElement("div");el.className="float-text "+cls;el.textContent=text;const p=cellPos(x,y);el.style.left=p.left+"px";el.style.top=p.top+"px";fxLayer.appendChild(el);setTimeout(()=>el.remove(),1000);}
 function flashCell(x,y,cls){const idx=(y-1)*WIDTH+(x-1);const c=boardEl.children[idx];if(!c)return;c.classList.add(cls);setTimeout(()=>c.classList.remove(cls),450);}
 function shake(){boardWrap.classList.remove("shake");void boardWrap.offsetWidth;boardWrap.classList.add("shake");setTimeout(()=>boardWrap.classList.remove("shake"),350);}
+function flashVignette(cls){
+ vignetteEl.className="";
+ void vignetteEl.offsetWidth;
+ vignetteEl.className=cls;
+}
 function projectile(a1,b1,a2,b2){const a=cellPos(a1,b1),b=cellPos(a2,b2);const el=document.createElement("div");el.className="proj";el.style.left=a.left+"px";el.style.top=a.top+"px";el.style.setProperty("--tx",(b.left-a.left)+"px");el.style.setProperty("--ty",(b.top-a.top)+"px");fxLayer.appendChild(el);setTimeout(()=>el.remove(),300);}
 function playFx(){
  for(const f of fxQueue){
@@ -619,13 +652,13 @@ function playFx(){
    case"enemyHit":flashCell(f.x,f.y,"flash-hit");floatText(f.x,f.y,"-"+f.amount,f.crit?"float-crit":"float-dmg");if(f.crit)shake();break;
    case"enemyDeath":flashCell(f.x,f.y,"flash-death");floatText(f.x,f.y,"SLAIN","float-death");break;
    case"miss":floatText(f.x,f.y,"miss","float-miss");break;
-   case"playerHit":flashCell(player.x,player.y,"flash-hurt");floatText(player.x,player.y,"-"+f.amount,"float-hurt");shake();break;
+   case"playerHit":flashCell(player.x,player.y,"flash-hurt");floatText(player.x,player.y,"-"+f.amount,"float-hurt");shake();flashVignette("v-hurt");break;
    case"playerMiss":floatText(player.x,player.y,"dodge","float-miss");break;
    case"heal":flashCell(player.x,player.y,"flash-heal");floatText(player.x,player.y,"+"+f.amount,"float-heal");break;
    case"gold":floatText(player.x,player.y,"+"+f.amount+"g","float-gold");break;
    case"goldSpend":floatText(player.x,player.y,"-"+f.amount+"g","float-gold");break;
    case"itemFloat":floatText(player.x,player.y,f.text,"float-heal");break;
-   case"level":floatText(player.x,player.y,"LEVEL UP!","float-level");break;
+   case"level":floatText(player.x,player.y,"LEVEL UP!","float-level");flashVignette("v-gold");break;
    case"spell":projectile(player.x,player.y,f.x,f.y);setTimeout(()=>{flashCell(f.x,f.y,f.hit?"flash-hit":"flash-heal");floatText(f.x,f.y,f.hit?("-"+f.amount+(f.crit?"!":"")):"miss",f.hit?(f.crit?"float-crit":"float-dmg"):"float-miss");},220);break;
   }
  }
@@ -644,21 +677,24 @@ function relicList(){
 
 function render(){
  if(player){
-  document.getElementById("hudFloor").textContent="Floor "+player.floor+"/"+MAX_FLOOR;
-  document.getElementById("hudTurn").textContent="Turn "+Math.min(turn+1,MAX_TURNS);
-  document.getElementById("hudClass").textContent=player.className+" Lv"+player.level;
-  document.getElementById("hudPts").textContent="Pts "+player.statPoints;
-  hpFill.style.width=Math.max(0,Math.min(100,(player.hp/player.maxhp)*100))+"%";
+  document.getElementById("hudFloor").textContent="🏰 Floor "+player.floor+"/"+MAX_FLOOR;
+  document.getElementById("hudTurn").textContent="⏳ Turn "+Math.min(turn+1,MAX_TURNS);
+  document.getElementById("hudClass").textContent="🎭 "+player.className+" Lv"+player.level;
+  document.getElementById("hudPts").textContent="📜 Pts "+player.statPoints;
+  const pct=Math.max(0,Math.min(100,(player.hp/player.maxhp)*100));
+  hpFill.style.width=pct+"%";
+  hpFill.style.background=pct>50?"linear-gradient(90deg,#66bb6a,#9ccc65)":pct>25?"linear-gradient(90deg,#ffa726,#ffca28)":"linear-gradient(90deg,#e53935,#ff5252)";
   document.getElementById("hudHp").textContent="HP "+player.hp+"/"+player.maxhp;
-  document.getElementById("hudAc").textContent="AC "+player.ac;
-  document.getElementById("hudXp").textContent="XP "+player.xp+"/"+player.xpNext;
-  document.getElementById("hudWeapon").textContent=player.weapon.name+(player.weapon.enhance>0?" +"+player.weapon.enhance:"")+" ("+player.weapon.dice+"d"+player.weapon.die+"+"+weaponBonus()+")";
+  document.getElementById("hudAc").textContent="🛡 AC "+player.ac;
+  document.getElementById("hudXp").textContent="✨ XP "+player.xp+"/"+player.xpNext;
+  document.getElementById("hudWeapon").textContent="⚔ "+player.weapon.name+(player.weapon.enhance>0?" +"+player.weapon.enhance:"")+" ("+player.weapon.dice+"d"+player.weapon.die+"+"+weaponBonus()+")";
   document.getElementById("hudStats").textContent="S"+player.str+" D"+player.dex+" C"+player.con+" I"+player.int;
-  document.getElementById("hudGold").textContent="Gold "+player.gold;
-  document.getElementById("hudPotions").textContent="Potions "+player.potions;
-  document.getElementById("hudAbility").textContent=player.abilityName+" "+player.abilityUses+"/"+player.abilityMax;
-  document.getElementById("hudKills").textContent="Kills "+player.kills;
-  document.getElementById("hudRelics").textContent="Relics: "+relicList();
+  document.getElementById("hudGold").textContent="💰 "+player.gold;
+  document.getElementById("hudPotions").textContent="🧪 "+player.potions;
+  document.getElementById("hudAbility").textContent="🔮 "+player.abilityName+" "+player.abilityUses+"/"+player.abilityMax;
+  document.getElementById("hudKills").textContent="⚔ Kills "+player.kills;
+  document.getElementById("hudDeaths").textContent="💀 "+(player.deaths||0);
+  document.getElementById("hudRelics").textContent="🔮 Relics: "+relicList();
  }
  const grid=[];
  for(let y=1;y<=HEIGHT;y++){grid[y]=[];for(let x=1;x<=WIDTH;x++)grid[y][x]=(map[y]&&map[y][x])?map[y][x]:" ";}
@@ -669,7 +705,13 @@ function render(){
  for(const e of enemies)if(inBounds(e.x,e.y))grid[e.y][e.x]=e.glyph;
  if(player&&inBounds(player.x,player.y))grid[player.y][player.x]="@";
  let html="";
- for(let y=1;y<=HEIGHT;y++)for(let x=1;x<=WIDTH;x++){const ch=grid[y][x];html+='<span class="cell '+classFor(ch)+'">'+(ch===" "?"&nbsp;":escapeHtml(ch))+"</span>";}
+ for(let y=1;y<=HEIGHT;y++)for(let x=1;x<=WIDTH;x++){
+  const ch=grid[y][x];
+  let cls="cell "+classFor(ch);
+  if(ch==="."||ch===" ")cls+=((x+y)%2===0)?" cb-a":" cb-b";
+  if(ch==="#")cls+=" wallbg";
+  html+='<span class="'+cls+'">'+(ch===" "?"&nbsp;":escapeHtml(ch))+"</span>";
+ }
  boardEl.innerHTML=html;
  logEl.innerHTML=logMessages.map(m=>'<li class="lg-'+m.cls+'">» '+escapeHtml(m.msg)+"</li>").join("");
 }
@@ -684,6 +726,21 @@ function doPlayerTurn(cmdOrAction){
  turn++;
  if(state!=="play"){finish();render();playFx();return;}
  enemiesAct();
+
+ // Roguelite death: keep ALL data, return to floor 1
+ if(player.hp<=0){
+  state="dead";
+  clearHold();
+  deathReason.textContent="The Crypt claims your body — not your legend.";
+  deathInfo.textContent="Everything is kept. Deaths: "+player.deaths+" · You rise at Floor 1.";
+  deathOverlay.classList.remove("hidden");
+  flashVignette("v-hurt");
+  shake();
+  persist("run");
+  render();playFx();
+  return;
+ }
+
  if(state==="play"&&turn>=MAX_TURNS){state="gameover";endReason="The dungeon collapses after "+turn+" turns.";}
  if(state!=="play"){finish();render();playFx();return;}
  render();playFx();persist("run");
@@ -691,8 +748,9 @@ function doPlayerTurn(cmdOrAction){
 
 function startGame(ci){
  closeShop();closeStats();closeSaves();clearHold();
+ deathOverlay.classList.add("hidden");
  createPlayer(ci);turn=0;logMessages=[];endReason="";state="play";
- activeSlot=String(Date.now()); // NEW expedition = NEW slot; old slots untouched
+ activeSlot=String(Date.now());
  meta.runs+=1;meta.deepestFloor=Math.max(meta.deepestFloor,1);
  addLog("You enter the crypt as a level 1 "+player.className+".");
  generateMap(player.floor);
@@ -707,20 +765,21 @@ function finish(){
  document.getElementById("endTitle").textContent=state==="win"?"VICTORY!":"GAME OVER";
  document.getElementById("endReason").textContent=endReason;
  document.getElementById("endScore").textContent="Final score: "+finalScore()+"  (Best: "+meta.bestScore+")";
- document.getElementById("endStats").textContent=player.className+" Lv"+player.level+" | Floor "+player.floor+"/"+MAX_FLOOR+" | Kills "+player.kills+" | Secrets "+player.secretKills+" | Gold "+player.gold+" | "+player.weapon.name+(player.weapon.enhance>0?" +"+player.weapon.enhance:"")+" | Relics: "+relicList();
- retryButton.classList.toggle("hidden",state!=="gameover");
+ document.getElementById("endStats").textContent=player.className+" Lv"+player.level+" | Floor "+player.floor+"/"+MAX_FLOOR+" | Kills "+player.kills+" | Secrets "+player.secretKills+" | 💀 "+(player.deaths||0)+" | "+player.weapon.name+(player.weapon.enhance>0?" +"+player.weapon.enhance:"");
  endOverlay.classList.remove("hidden");
- persist(state==="win"?"victorious":"fallen"); // snapshot preserved either way
+ if(state==="win")flashVignette("v-gold");
+ persist(state==="win"?"victorious":"run");
 }
 function toTitle(){
  stopAuto();clearHold();closeShop();closeStats();closeSaves();
+ deathOverlay.classList.add("hidden");
  state="title";player=null;
  endOverlay.classList.add("hidden");hudEl.classList.add("hidden");classOverlay.classList.remove("hidden");
  updateTitleInfo();
  render();
 }
 
-// ---------- Hold-to-walk (speed-scaled) ----------
+// ---------- Hold-to-walk ----------
 const MOVE_CMDS=["w","k","8","n","s","j","2","a","h","4","d","l","6","e"];
 function isMoveCmd(c){return MOVE_CMDS.includes(c);}
 let holdTimeout=null,holdInterval=null,heldCmd=null;
@@ -746,7 +805,7 @@ function applySpeed(){
  document.body.classList.toggle("sp3",speedMult===3);
  document.body.classList.toggle("sp5",speedMult===5);
  if(autoTimer){clearInterval(autoTimer);autoTimer=setInterval(autoTick,170/speedMult);}
- if(heldCmd){const c=heldCmd;beginHold(c);}
+ if(heldCmd){beginHold(heldCmd);}
 }
 speedButton.addEventListener("click",()=>{
  speedMult=SPEEDS[(SPEEDS.indexOf(speedMult)+1)%SPEEDS.length];
@@ -756,6 +815,7 @@ speedButton.addEventListener("click",()=>{
 
 // ---------- Auto-play ----------
 function autoTick(){
+ if(state==="dead"){performRevive();return;}
  if(state!=="play"){stopAuto();return;}
  if(shopOpen)autoShop();
  else{autoSpend();doPlayerTurn(autoCommand());}
@@ -798,11 +858,7 @@ document.addEventListener("keydown",(event)=>{
  if(event.repeat)return;
  const key=event.key.toLowerCase();
 
- if(savesOpen){
-  event.preventDefault();
-  if(key==="escape"||key==="enter")closeSaves();
-  return;
- }
+ if(savesOpen){event.preventDefault();if(key==="escape"||key==="enter")closeSaves();return;}
  if(shopOpen){
   event.preventDefault();
   if(key>="1"&&key<="9")tryBuyIndex(parseInt(key,10)-1);
@@ -816,6 +872,7 @@ document.addEventListener("keydown",(event)=>{
   else if(key==="escape"||key==="c"||key==="enter")closeStats();
   return;
  }
+ if(state==="dead"){if(key==="enter"||key===" "){event.preventDefault();performRevive();}return;}
  if(state==="title"){if(key==="1"||key==="2"||key==="3")startGame(parseInt(key,10));return;}
  if(state!=="play"){if(key==="enter"||key===" "){event.preventDefault();toTitle();}return;}
 
@@ -837,7 +894,7 @@ document.addEventListener("keyup",(event)=>{
 document.querySelectorAll(".class-btn[data-class]").forEach(b=>b.addEventListener("click",()=>startGame(parseInt(b.dataset.class,10))));
 continueButton.addEventListener("click",openSaves);
 savesList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&b.dataset.slot)continueRun(b.dataset.slot);});
-retryButton.addEventListener("click",()=>continueRun(activeSlot));
+riseButton.addEventListener("click",performRevive);
 shopList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&!b.disabled)tryBuyIndex(parseInt(b.dataset.idx,10));});
 statList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&!b.disabled&&spendStatPoint(b.dataset.stat)){renderStats();render();}});
 document.getElementById("statButton").addEventListener("click",()=>{if(state==="play"&&!shopOpen){if(statOpen)closeStats();else{if(autoMode)stopAuto();openStats();}}});
@@ -845,7 +902,7 @@ autoButton.addEventListener("click",()=>(autoMode?stopAuto():startAuto()));
 document.getElementById("restartButton").addEventListener("click",toTitle);
 document.getElementById("playAgainButton").addEventListener("click",toTitle);
 
-// ---------- Erase data: the ONLY wipe in the codebase ----------
+// ---------- Erase data: the ONLY wipe ----------
 let eraseArmed=false,eraseTimer=null;
 eraseButton.addEventListener("click",()=>{
  if(!eraseArmed){
@@ -858,13 +915,28 @@ eraseButton.addEventListener("click",()=>{
  clearTimeout(eraseTimer);
  eraseArmed=false;eraseButton.textContent="🗑 Erase data";eraseButton.classList.remove("armed");
  try{localStorage.removeItem(SAVE_KEY);}catch(e){}
- meta={bestScore:0,deepestFloor:0,wins:0,runs:0};
+ meta={bestScore:0,deepestFloor:0,wins:0,runs:0,deaths:0};
  activeSlot=null;
  stopAuto();clearHold();closeShop();closeStats();closeSaves();
+ deathOverlay.classList.add("hidden");
  state="title";player=null;
  endOverlay.classList.add("hidden");hudEl.classList.add("hidden");classOverlay.classList.remove("hidden");
  updateTitleInfo();render();
 });
+
+// ---------- Ambient embers ----------
+(function spawnEmbers(){
+ for(let i=0;i<18;i++){
+  const e=document.createElement("div");
+  e.className="ember";
+  const size=3+Math.random()*4;
+  e.style.width=size+"px";e.style.height=size+"px";
+  e.style.left=(Math.random()*100)+"%";
+  e.style.animationDuration=(6+Math.random()*9)+"s";
+  e.style.animationDelay=(Math.random()*10)+"s";
+  embersEl.appendChild(e);
+ }
+})();
 
 // ---------- Boot ----------
 (function boot(){
