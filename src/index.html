@@ -59,7 +59,7 @@
       <span class="hint">SECRET super-bosses (rare ? portals; each drops a relic)</span>
     </div>
     <div class="controls-help">
-      Move: WASD/HJKL/Arrows · F ability · Q potion · X defend · . wait · B shop (on M) · C stat menu
+      Move: WASD/HJKL/Arrows (HOLD to walk) · Left-click: attack / move · F ability · Q potion · X defend · . wait · B shop (on M) · C stat menu
     </div>
 
     <ul id="log" class="log"></ul>
@@ -67,6 +67,7 @@
     <div class="buttons">
       <button id="statButton">📜 Stats (C)</button>
       <button id="autoButton">▶ Auto-Play Demo</button>
+      <button id="speedButton">⏩ 1x</button>
       <button id="restartButton">↻ Restart</button>
       <button id="eraseButton">🗑 Erase data</button>
     </div>
@@ -80,7 +81,15 @@
       <button class="class-btn" data-class="1"><strong>1) Fighter</strong> — High armor and HP. Ability: Second Wind.</button>
       <button class="class-btn" data-class="2"><strong>2) Rogue</strong> — Fast and deadly. Ability: Sneak Strike.</button>
       <button class="class-btn" data-class="3"><strong>3) Wizard</strong> — Fragile caster. Ability: Firebolt.</button>
-      <p class="hint">Progress auto-saves every turn. Only "Erase data" wipes it. Level ups grant +3 stat points (C). Secret Weapons awaken rarely — or when a dragon's death cry echoes… Floor 100: Tiamat.</p>
+      <p class="hint">Every new game creates a NEW save slot — old expeditions are never deleted. Only "Erase data" wipes. Hold move keys to walk. Left-click enemies to attack.</p>
+    </div>
+  </div>
+
+  <div id="savesOverlay" class="overlay hidden">
+    <div class="panel shop-panel">
+      <h2>Saved expeditions</h2>
+      <div id="savesList" class="shop-list"></div>
+      <p class="hint">Click a save to resume · Esc to close · nothing here can be deleted except by "Erase data"</p>
     </div>
   </div>
 
@@ -108,6 +117,7 @@
       <p id="endReason"></p>
       <p id="endScore"></p>
       <p id="endStats"></p>
+      <button id="retryButton" class="hidden">↩ Retry from last save</button>
       <button id="playAgainButton">Play Again</button>
     </div>
   </div>
