@@ -1,7 +1,9 @@
 /* ============================================================
-   DND (Dungeon and dragons) — v5
-   + Persistent progression: auto-save every turn, Continue
-     button, meta records. ONLY "Erase data" wipes storage.
+   DND (Dungeon and dragons) — v7
+   + Multi-slot saves: new class = NEW slot, nothing overwritten
+   + Saves list overlay (resume any expedition)
+   + Speed button 1x/3x/5x (auto-play + hold-walk + FX)
+   + Only "Erase data" can delete anything
    ============================================================ */
 
 function mulberry32(a){return function(){a|=0;a=(a+0x6D2B79F5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};}
@@ -62,8 +64,11 @@ const SHOP_WEAPONS=[
 
 let player=null,map=[],enemies=[],items=[],stairs=null,merchant=null,portal=null;
 let logMessages=[],turn=0,state="title",endReason="";
-let autoMode=false,autoTimer=null,shopOpen=false,statOpen=false,fxQueue=[];
+let autoMode=false,autoTimer=null,shopOpen=false,statOpen=false,savesOpen=false,fxQueue=[];
 let meta={bestScore:0,deepestFloor:0,wins:0,runs:0};
+let activeSlot=null;
+let speedMult=1;
+const SPEEDS=[1,3,5];
 
 const boardEl=document.getElementById("board"),boardWrap=document.getElementById("boardWrap"),
 fxLayer=document.getElementById("fxLayer"),logEl=document.getElementById("log"),hudEl=document.getElementById("hud"),
@@ -72,46 +77,83 @@ endOverlay=document.getElementById("endOverlay"),shopOverlay=document.getElement
 shopList=document.getElementById("shopList"),shopGold=document.getElementById("shopGold"),
 statOverlay=document.getElementById("statOverlay"),statList=document.getElementById("statList"),
 statPts=document.getElementById("statPts"),autoButton=document.getElementById("autoButton"),
+speedButton=document.getElementById("speedButton"),
 eraseButton=document.getElementById("eraseButton"),continueButton=document.getElementById("continueButton"),
-metaLine=document.getElementById("metaLine");
+retryButton=document.getElementById("retryButton"),metaLine=document.getElementById("metaLine"),
+savesOverlay=document.getElementById("savesOverlay"),savesList=document.getElementById("savesList");
 
 // ============================================================
-// SAVE SYSTEM — auto-save; only "Erase data" wipes storage
+// SAVE SYSTEM — multi-slot. Only Erase deletes anything.
+// Shape: { meta, slots: { id: runData } }   (legacy {meta,run} auto-migrates)
 // ============================================================
 function loadSave(){
- try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return null;return JSON.parse(raw);}catch(e){return null;}
-}
-function persist(){
  try{
-  const data={meta:meta,run:null};
-  if(state==="play"&&player){
-   data.run={player:player,map:map,enemies:enemies,items:items,stairs:stairs,
-    merchant:merchant,portal:portal,turn:turn,logMessages:logMessages};
+  const raw=localStorage.getItem(SAVE_KEY);
+  if(!raw)return null;
+  const d=JSON.parse(raw);
+  if(!d.slots){ // migrate old single-run format
+   d.slots={};
+   if(d.run)d.slots["legacy"]=Object.assign({created:0,status:"alive"},d.run);
+   delete d.run;
+  }
+  return d;
+ }catch(e){return null;}
+}
+function persist(mode){
+ try{
+  const data=loadSave()||{meta:meta,slots:{}};
+  data.meta=meta;
+  if(activeSlot){
+   const prev=data.slots[activeSlot];
+   if(mode==="run"&&state==="play"&&player){
+    data.slots[activeSlot]={player:player,map:map,enemies:enemies,items:items,stairs:stairs,
+     merchant:merchant,portal:portal,turn:turn,logMessages:logMessages,
+     created:prev?prev.created:Date.now(),status:"alive"};
+   }else if(prev&&mode==="fallen"){prev.status="fallen";data.slots[activeSlot]=prev;}
+   else if(prev&&mode==="victorious"){prev.status="victorious";data.slots[activeSlot]=prev;}
   }
   localStorage.setItem(SAVE_KEY,JSON.stringify(data));
  }catch(e){}
 }
-function continueRun(){
+function slotCount(){const d=loadSave();return d?Object.keys(d.slots||{}).length:0;}
+
+function openSaves(){savesOpen=true;renderSaves();savesOverlay.classList.remove("hidden");}
+function closeSaves(){savesOpen=false;savesOverlay.classList.add("hidden");}
+function renderSaves(){
  const data=loadSave();
- if(!data||!data.run||!data.run.player)return;
- const r=data.run;
+ const slots=(data&&data.slots)||{};
+ const ids=Object.keys(slots).sort((a,b)=>(slots[b].created||0)-(slots[a].created||0));
+ savesList.innerHTML=ids.map((id,i)=>{
+  const r=slots[id],p=r.player;
+  if(!p)return"";
+  const tag=r.status==="victorious"?"★ victorious":(r.status==="fallen"?"† fallen":"▶ alive");
+  return '<button class="shop-item" data-slot="'+id+'"><span>'+(i+1)+") Floor "+p.floor+" · "+p.className+
+   " Lv"+p.level+" · HP "+p.hp+"/"+p.maxhp+" · Turn "+(r.turn||0)+"</span>"+
+   '<span class="si-cost">'+tag+"</span></button>";
+ }).join("")||'<p class="hint">No saves yet.</p>';
+}
+function continueRun(id){
+ const data=loadSave();
+ const r=data&&data.slots&&data.slots[id];
+ if(!r||!r.player)return;
  if(data.meta)meta=data.meta;
+ activeSlot=id;
  player=r.player;map=r.map||[];enemies=r.enemies||[];items=r.items||[];
  stairs=r.stairs||null;merchant=r.merchant||null;portal=r.portal||null;
  turn=r.turn||0;logMessages=r.logMessages||[];
  state="play";
- closeShop();closeStats();
+ closeShop();closeStats();closeSaves();clearHold();
  classOverlay.classList.add("hidden");endOverlay.classList.add("hidden");hudEl.classList.remove("hidden");
- addLog("You resume your delve.","heal");
- persist();
+ addLog(r.status==="fallen"?"You rise again at your last remembered moment.":"You resume your delve.","heal");
+ persist("run");
  render();
 }
 function updateTitleInfo(){
  metaLine.textContent="Best "+meta.bestScore+" · Deepest floor "+meta.deepestFloor+" · Wins "+meta.wins+" · Runs "+meta.runs;
- const s=loadSave();
- if(s&&s.run&&s.run.player&&state!=="play"){
+ const n=slotCount();
+ if(n>0&&state!=="play"){
   continueButton.classList.remove("hidden");
-  continueButton.textContent="⏩ Continue — Floor "+s.run.player.floor+", "+s.run.player.className+" Lv"+s.run.player.level+" (HP "+s.run.player.hp+"/"+s.run.player.maxhp+")";
+  continueButton.textContent="⏩ Continue / Saves ("+n+")";
  }else{
   continueButton.classList.add("hidden");
  }
@@ -234,7 +276,7 @@ function spendStatPoint(stat,quiet){
  if(stat==="con"){player.maxhp+=2;player.hp=Math.min(player.maxhp,player.hp+2);}
  if(stat==="dex"){if(Math.floor(abilityMod(player.dex)/2)>Math.floor(oldDex/2))player.ac+=1;}
  if(!quiet)addLog(stat.toUpperCase()+" rises to "+player[stat]+"!","level");
- persist();
+ persist("run");
  return true;
 }
 function autoSpend(){
@@ -317,11 +359,13 @@ function playerAttack(target,advantage,extraDie){
   if(target.hp<=0)awardKill(target);
  }else{addLog("You miss the "+target.name+".","miss");fx({kind:"miss",x:target.x,y:target.y});}
 }
-function useAbility(){
+function useAbility(targetOverride){
  if(player.abilityUses<=0){addLog("No ability uses remain.");return false;}
  if(player.classIndex===1){player.abilityUses--;const heal=rollDice(1,10)+player.level;player.hp=Math.min(player.maxhp,player.hp+heal);addLog("Second Wind restores "+heal+" HP.","heal");fx({kind:"heal",amount:heal});return true;}
  if(player.classIndex===2){const t=adjacentEnemy();if(!t){addLog("Sneak Strike requires an adjacent enemy.");return false;}player.abilityUses--;playerAttack(t,true,6);return true;}
- if(player.classIndex===3){const[t]=nearestEnemy(8);if(!t){addLog("Firebolt needs a target within 8 tiles.");return false;}
+ if(player.classIndex===3){
+  const t=targetOverride||nearestEnemy(8)[0];
+  if(!t){addLog("Firebolt needs a target within 8 tiles.");return false;}
   player.abilityUses--;const roll=die(20);
   if(roll===1){addLog("Your Firebolt fizzles!","miss");fx({kind:"spell",x:t.x,y:t.y,hit:false});return true;}
   const total=roll+abilityMod(player.int)+proficiency();const crit=roll===20;
@@ -439,7 +483,7 @@ function buildEntries(){
  if(player.trainFocus<1)e.push({id:"focus",label:"Focus Study (+1 Ability Use)",cost:40,apply:()=>{player.trainFocus++;player.abilityMax++;player.abilityUses++;addLog("Your focus deepens.","shop");}});
  return e;
 }
-function openShop(){shopOpen=true;addLog("The merchant bows: \"Browse, hero...\"","shop");renderShop();shopOverlay.classList.remove("hidden");}
+function openShop(){shopOpen=true;clearHold();addLog("The merchant bows: \"Browse, hero...\"","shop");renderShop();shopOverlay.classList.remove("hidden");}
 function closeShop(){shopOpen=false;shopOverlay.classList.add("hidden");}
 function renderShop(){
  const es=buildEntries();
@@ -449,7 +493,7 @@ function renderShop(){
 function tryBuyIndex(i){
  const es=buildEntries();const en=es[i];if(!en)return;
  if(player.gold<en.cost){addLog("Not enough gold.","miss");renderShop();return;}
- player.gold-=en.cost;en.apply();fx({kind:"goldSpend",amount:en.cost});renderShop();render();persist();
+ player.gold-=en.cost;en.apply();fx({kind:"goldSpend",amount:en.cost});renderShop();render();persist("run");
 }
 function tryBuyById(id){const es=buildEntries();const i=es.findIndex(x=>x.id===id);if(i!==-1&&player.gold>=es[i].cost)tryBuyIndex(i);}
 function autoShop(){
@@ -630,31 +674,33 @@ function render(){
  logEl.innerHTML=logMessages.map(m=>'<li class="lg-'+m.cls+'">» '+escapeHtml(m.msg)+"</li>").join("");
 }
 
-function doPlayerTurn(cmd){
+// ---------- Turn driver ----------
+function doPlayerTurn(cmdOrAction){
  if(state!=="play")return;
  player.defending=false;
  if(player.relics.emerald&&player.hp<player.maxhp)player.hp=Math.min(player.maxhp,player.hp+2);
- const consumed=processCommand(cmd);
+ const consumed=(typeof cmdOrAction==="function")?cmdOrAction():processCommand(cmdOrAction);
  if(!consumed){addLog("That action did nothing.");render();return;}
  turn++;
  if(state!=="play"){finish();render();playFx();return;}
  enemiesAct();
  if(state==="play"&&turn>=MAX_TURNS){state="gameover";endReason="The dungeon collapses after "+turn+" turns.";}
- if(state!=="play")finish();
- render();playFx();persist();
+ if(state!=="play"){finish();render();playFx();return;}
+ render();playFx();persist("run");
 }
 
 function startGame(ci){
- closeShop();closeStats();
+ closeShop();closeStats();closeSaves();clearHold();
  createPlayer(ci);turn=0;logMessages=[];endReason="";state="play";
+ activeSlot=String(Date.now()); // NEW expedition = NEW slot; old slots untouched
  meta.runs+=1;meta.deepestFloor=Math.max(meta.deepestFloor,1);
  addLog("You enter the crypt as a level 1 "+player.className+".");
  generateMap(player.floor);
  classOverlay.classList.add("hidden");endOverlay.classList.add("hidden");hudEl.classList.remove("hidden");
- render();persist();
+ render();persist("run");
 }
 function finish(){
- stopAuto();closeShop();closeStats();
+ stopAuto();clearHold();closeShop();closeStats();closeSaves();
  meta.bestScore=Math.max(meta.bestScore,finalScore());
  meta.deepestFloor=Math.max(meta.deepestFloor,player.floor);
  if(state==="win")meta.wins+=1;
@@ -662,25 +708,63 @@ function finish(){
  document.getElementById("endReason").textContent=endReason;
  document.getElementById("endScore").textContent="Final score: "+finalScore()+"  (Best: "+meta.bestScore+")";
  document.getElementById("endStats").textContent=player.className+" Lv"+player.level+" | Floor "+player.floor+"/"+MAX_FLOOR+" | Kills "+player.kills+" | Secrets "+player.secretKills+" | Gold "+player.gold+" | "+player.weapon.name+(player.weapon.enhance>0?" +"+player.weapon.enhance:"")+" | Relics: "+relicList();
+ retryButton.classList.toggle("hidden",state!=="gameover");
  endOverlay.classList.remove("hidden");
- persist(); // run finished -> snapshot cleared, meta kept
+ persist(state==="win"?"victorious":"fallen"); // snapshot preserved either way
 }
 function toTitle(){
- stopAuto();closeShop();closeStats();
+ stopAuto();clearHold();closeShop();closeStats();closeSaves();
  state="title";player=null;
  endOverlay.classList.add("hidden");hudEl.classList.add("hidden");classOverlay.classList.remove("hidden");
  updateTitleInfo();
  render();
 }
 
+// ---------- Hold-to-walk (speed-scaled) ----------
+const MOVE_CMDS=["w","k","8","n","s","j","2","a","h","4","d","l","6","e"];
+function isMoveCmd(c){return MOVE_CMDS.includes(c);}
+let holdTimeout=null,holdInterval=null,heldCmd=null;
+function clearHold(){
+ if(holdTimeout){clearTimeout(holdTimeout);holdTimeout=null;}
+ if(holdInterval){clearInterval(holdInterval);holdInterval=null;}
+ heldCmd=null;
+}
+function beginHold(cmd){
+ clearHold();
+ heldCmd=cmd;
+ holdTimeout=setTimeout(()=>{
+  holdInterval=setInterval(()=>{
+   if(state==="play"&&!shopOpen&&!statOpen&&!savesOpen&&!autoMode)doPlayerTurn(cmd);
+   else clearHold();
+  },150/speedMult);
+ },300/speedMult);
+}
+window.addEventListener("blur",clearHold);
+
+// ---------- Speed ----------
+function applySpeed(){
+ document.body.classList.toggle("sp3",speedMult===3);
+ document.body.classList.toggle("sp5",speedMult===5);
+ if(autoTimer){clearInterval(autoTimer);autoTimer=setInterval(autoTick,170/speedMult);}
+ if(heldCmd){const c=heldCmd;beginHold(c);}
+}
+speedButton.addEventListener("click",()=>{
+ speedMult=SPEEDS[(SPEEDS.indexOf(speedMult)+1)%SPEEDS.length];
+ speedButton.textContent="⏩ "+speedMult+"x";
+ applySpeed();
+});
+
+// ---------- Auto-play ----------
+function autoTick(){
+ if(state!=="play"){stopAuto();return;}
+ if(shopOpen)autoShop();
+ else{autoSpend();doPlayerTurn(autoCommand());}
+}
 function startAuto(){
  if(state==="title")startGame(1);
+ clearHold();closeSaves();
  autoMode=true;autoButton.textContent=" Stop Auto-Play";
- autoTimer=setInterval(()=>{
-  if(state!=="play"){stopAuto();return;}
-  if(shopOpen)autoShop();
-  else{autoSpend();doPlayerTurn(autoCommand());}
- },170);
+ autoTimer=setInterval(autoTick,170/speedMult);
 }
 function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}autoMode=false;autoButton.textContent="▶ Auto-Play Demo";}
 
@@ -692,14 +776,37 @@ function mapKeyToCommand(key){
  return v.includes(k)?k:null;
 }
 
+// ---------- Mouse ----------
+boardEl.addEventListener("click",(e)=>{
+ const cellEl=e.target.closest(".cell");
+ if(!cellEl||state!=="play"||shopOpen||statOpen||savesOpen||autoMode)return;
+ const idx=Array.prototype.indexOf.call(boardEl.children,cellEl);
+ if(idx<0)return;
+ const x=idx%WIDTH+1,y=Math.floor(idx/WIDTH)+1;
+ const d=dist(player.x,player.y,x,y);
+ const enemy=enemyAt(x,y);
+ if(enemy){
+  if(d===1){doPlayerTurn(()=>{playerAttack(enemy);return true;});}
+  else if(player.classIndex===3&&player.abilityUses>0&&d<=8){doPlayerTurn(()=>useAbility(enemy));}
+  else{addLog("Too far to strike.","miss");render();}
+  return;
+ }
+ if(d===1){const dx=x-player.x,dy=y-player.y;doPlayerTurn(()=>tryMove(dx,dy));}
+});
+
 document.addEventListener("keydown",(event)=>{
  if(event.repeat)return;
  const key=event.key.toLowerCase();
 
+ if(savesOpen){
+  event.preventDefault();
+  if(key==="escape"||key==="enter")closeSaves();
+  return;
+ }
  if(shopOpen){
   event.preventDefault();
   if(key>="1"&&key<="9")tryBuyIndex(parseInt(key,10)-1);
-  else if(key==="escape"||key==="enter"||key==="b"||key==="q"){closeShop();render();persist();}
+  else if(key==="escape"||key==="enter"||key==="b"||key==="q"){closeShop();render();persist("run");}
   return;
  }
  if(statOpen){
@@ -715,11 +822,22 @@ document.addEventListener("keydown",(event)=>{
  if(key==="c"){event.preventDefault();if(autoMode)stopAuto();openStats();return;}
 
  const cmd=mapKeyToCommand(key);
- if(cmd){event.preventDefault();if(autoMode)stopAuto();doPlayerTurn(cmd);}
+ if(cmd){
+  event.preventDefault();
+  if(autoMode)stopAuto();
+  doPlayerTurn(cmd);
+  if(isMoveCmd(cmd))beginHold(cmd);
+ }
+});
+document.addEventListener("keyup",(event)=>{
+ const cmd=mapKeyToCommand(event.key.toLowerCase());
+ if(cmd&&cmd===heldCmd)clearHold();
 });
 
 document.querySelectorAll(".class-btn[data-class]").forEach(b=>b.addEventListener("click",()=>startGame(parseInt(b.dataset.class,10))));
-continueButton.addEventListener("click",continueRun);
+continueButton.addEventListener("click",openSaves);
+savesList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&b.dataset.slot)continueRun(b.dataset.slot);});
+retryButton.addEventListener("click",()=>continueRun(activeSlot));
 shopList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&!b.disabled)tryBuyIndex(parseInt(b.dataset.idx,10));});
 statList.addEventListener("click",e=>{const b=e.target.closest(".shop-item");if(b&&!b.disabled&&spendStatPoint(b.dataset.stat)){renderStats();render();}});
 document.getElementById("statButton").addEventListener("click",()=>{if(state==="play"&&!shopOpen){if(statOpen)closeStats();else{if(autoMode)stopAuto();openStats();}}});
@@ -727,7 +845,7 @@ autoButton.addEventListener("click",()=>(autoMode?stopAuto():startAuto()));
 document.getElementById("restartButton").addEventListener("click",toTitle);
 document.getElementById("playAgainButton").addEventListener("click",toTitle);
 
-// ---------- Erase data: the ONLY wipe (two-click confirm) ----------
+// ---------- Erase data: the ONLY wipe in the codebase ----------
 let eraseArmed=false,eraseTimer=null;
 eraseButton.addEventListener("click",()=>{
  if(!eraseArmed){
@@ -741,13 +859,14 @@ eraseButton.addEventListener("click",()=>{
  eraseArmed=false;eraseButton.textContent="🗑 Erase data";eraseButton.classList.remove("armed");
  try{localStorage.removeItem(SAVE_KEY);}catch(e){}
  meta={bestScore:0,deepestFloor:0,wins:0,runs:0};
- stopAuto();closeShop();closeStats();
+ activeSlot=null;
+ stopAuto();clearHold();closeShop();closeStats();closeSaves();
  state="title";player=null;
  endOverlay.classList.add("hidden");hudEl.classList.add("hidden");classOverlay.classList.remove("hidden");
  updateTitleInfo();render();
 });
 
-// ---------- Boot: load meta + show Continue if a run exists ----------
+// ---------- Boot ----------
 (function boot(){
  const saved=loadSave();
  if(saved&&saved.meta)meta=saved.meta;
