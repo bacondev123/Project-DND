@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <div id="embers"></div>
+  <div id="vignette"></div>
+
   <div class="game-shell">
     <header>
       <h1>DND (Dungeon and dragons)</h1>
@@ -36,6 +39,7 @@
         <span id="hudPotions"></span>
         <span id="hudAbility"></span>
         <span id="hudKills"></span>
+        <span id="hudDeaths"></span>
       </div>
       <div class="hud-row"><span id="hudRelics" class="relics"></span></div>
     </section>
@@ -75,21 +79,21 @@
 
   <div id="classOverlay" class="overlay">
     <div class="panel">
-      <h2>Choose your class</h2>
+      <h2>✦ Choose your class ✦</h2>
       <p id="metaLine" class="shop-gold"></p>
       <button id="continueButton" class="class-btn hidden"></button>
       <button class="class-btn" data-class="1"><strong>1) Fighter</strong> — High armor and HP. Ability: Second Wind.</button>
       <button class="class-btn" data-class="2"><strong>2) Rogue</strong> — Fast and deadly. Ability: Sneak Strike.</button>
       <button class="class-btn" data-class="3"><strong>3) Wizard</strong> — Fragile caster. Ability: Firebolt.</button>
-      <p class="hint">Every new game creates a NEW save slot — old expeditions are never deleted. Only "Erase data" wipes. Hold move keys to walk. Left-click enemies to attack.</p>
+      <p class="hint">Death only returns you to Floor 1 — everything you earned is kept forever. Only "Erase data" wipes.</p>
     </div>
   </div>
 
   <div id="savesOverlay" class="overlay hidden">
     <div class="panel shop-panel">
-      <h2>Saved expeditions</h2>
+      <h2>✦ Saved expeditions ✦</h2>
       <div id="savesList" class="shop-list"></div>
-      <p class="hint">Click a save to resume · Esc to close · nothing here can be deleted except by "Erase data"</p>
+      <p class="hint">Click a save to resume · Esc to close</p>
     </div>
   </div>
 
@@ -104,10 +108,19 @@
 
   <div id="statOverlay" class="overlay hidden">
     <div class="panel shop-panel">
-      <h2>Character Sheet</h2>
+      <h2>✦ Character Sheet ✦</h2>
       <p id="statPts" class="shop-gold"></p>
       <div id="statList" class="shop-list"></div>
       <p class="hint">1–4 spend a point · Esc / C to close · CON +2 HP/pt · DEX +1 AC per +2 mod</p>
+    </div>
+  </div>
+
+  <div id="deathOverlay" class="overlay hidden">
+    <div class="panel death-panel">
+      <h2 class="death-title">YOU DIED</h2>
+      <p id="deathReason"></p>
+      <p id="deathInfo" class="hint"></p>
+      <button id="riseButton">☀ Rise at Floor 1</button>
     </div>
   </div>
 
@@ -117,7 +130,6 @@
       <p id="endReason"></p>
       <p id="endScore"></p>
       <p id="endStats"></p>
-      <button id="retryButton" class="hidden">↩ Retry from last save</button>
       <button id="playAgainButton">Play Again</button>
     </div>
   </div>
