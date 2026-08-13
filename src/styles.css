@@ -29,6 +29,7 @@ h1 { text-align: center; font-size: 1.6rem; letter-spacing: 1px; color: #fff; te
 .board { display: grid; grid-template-columns: repeat(27, 24px); background: #101226; border: 2px solid #4dd0ff; border-radius: 8px; padding: 10px; box-shadow: 0 0 22px rgba(77,208,255,.25), inset 0 0 40px rgba(0,0,0,.6); font-family: Consolas, monospace; }
 #fxLayer { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: visible; }
 .cell { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: bold; }
+.cell:hover { box-shadow: inset 0 0 0 1px rgba(77,208,255,.45); cursor: pointer; }
 
 .t-wall{color:#3d4265}.t-floor{color:#262b4a}
 .t-player{color:#4dd0ff;text-shadow:0 0 8px rgba(77,208,255,.8)}
@@ -62,6 +63,16 @@ h1 { text-align: center; font-size: 1.6rem; letter-spacing: 1px; color: #fff; te
 .shake{animation:shakeAnim .35s}
 @keyframes shakeAnim{0%,100%{transform:translate(0,0)}20%{transform:translate(-5px,2px)}40%{transform:translate(5px,-2px)}60%{transform:translate(-4px,-1px)}80%{transform:translate(4px,1px)}}
 
+/* Speed modes: snappier FX at 3x / 5x */
+body.sp3 .float-text{animation-duration:.5s}
+body.sp5 .float-text{animation-duration:.33s}
+body.sp3 .proj{animation-duration:.12s}
+body.sp5 .proj{animation-duration:.08s}
+body.sp3 .shake{animation-duration:.2s}
+body.sp5 .shake{animation-duration:.12s}
+body.sp3 .flash-hit,body.sp3 .flash-hurt,body.sp3 .flash-heal,body.sp3 .flash-death{animation-duration:.25s}
+body.sp5 .flash-hit,body.sp5 .flash-hurt,body.sp5 .flash-heal,body.sp5 .flash-death{animation-duration:.16s}
+
 .legend{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;font-family:Consolas,monospace;font-size:.76rem;color:#9fa8da}
 .controls-help{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;font-family:Consolas,monospace;font-size:.76rem;color:#7986cb}
 .log{list-style:none;background:rgba(20,22,43,.85);border:1px solid #34395e;border-radius:10px;padding:8px 14px;min-height:118px;font-family:Consolas,monospace;font-size:.82rem;color:#c5cae9;display:flex;flex-direction:column;gap:2px}
@@ -74,7 +85,7 @@ button:hover{background:#2e3460}
 #eraseButton{border-color:#ff5252;color:#ff8a80}
 #eraseButton:hover{background:#3a2020}
 #eraseButton.armed{background:#5a1f1f;color:#fff;animation:portalPulse .5s infinite alternate}
-#continueButton{border-color:#00e676;color:#b9f6ca;font-weight:bold}
+#continueButton,#retryButton{border-color:#00e676;color:#b9f6ca;font-weight:bold}
 
 .overlay{position:fixed;inset:0;background:rgba(5,6,15,.78);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:10}
 .panel{background:#181b33;border:1px solid #4dd0ff;border-radius:14px;padding:26px 30px;display:flex;flex-direction:column;gap:12px;max-width:460px;width:92%;box-shadow:0 0 30px rgba(77,208,255,.3);text-align:center}
@@ -82,7 +93,7 @@ button:hover{background:#2e3460}
 #endTitle{font-size:1.5rem;letter-spacing:2px}
 #endScore{color:#ffd54f;font-family:Consolas,monospace}
 #endStats{color:#9fa8da;font-family:Consolas,monospace;font-size:.8rem}
-.shop-panel{max-width:560px}
+.shop-panel{max-width:600px}
 .shop-gold{color:#ffd54f;font-family:Consolas,monospace}
 .shop-list{display:flex;flex-direction:column;gap:6px;max-height:320px;overflow-y:auto}
 .shop-item{display:flex;justify-content:space-between;gap:10px;border-color:#3c4166;text-align:left;font-family:Consolas,monospace}
