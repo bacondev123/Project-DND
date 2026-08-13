@@ -22,6 +22,7 @@
         <span id="hudTurn"></span>
         <span id="hudClass"></span>
         <span id="hudPts"></span>
+        <span id="hudSkillPts"></span>
       </div>
       <div class="hud-row">
         <span class="hp-label">HP</span>
@@ -29,6 +30,7 @@
         <span id="hudHp"></span>
         <span id="hudAc"></span>
         <span id="hudXp"></span>
+        <span id="hudDmg"></span>
       </div>
       <div class="hud-row">
         <span id="hudWeapon"></span>
@@ -38,6 +40,7 @@
         <span id="hudGold"></span>
         <span id="hudPotions"></span>
         <span id="hudAbility"></span>
+        <span id="hudSkills"></span>
         <span id="hudKills"></span>
         <span id="hudDeaths"></span>
       </div>
@@ -55,21 +58,22 @@
       <span class="t-drake">r drake</span><span class="t-demon">&amp; demon</span><span class="t-knight">K dknight</span>
       <span class="t-dragon">D dragon</span><span class="t-tiamat">T Tiamat</span><span class="t-potion">! potion</span>
       <span class="t-gold">$ gold</span><span class="t-stairs">+ stairs</span><span class="t-merchant">M merchant</span>
-      <span class="t-portal">? portal</span>
+      <span class="t-smith">A blacksmith</span><span class="t-portal">? portal</span>
     </div>
     <div class="legend">
       <span class="t-sapphire">W Sapphire</span><span class="t-diamond">V Diamond</span><span class="t-ultima">U Ultima</span>
       <span class="t-ruby">R Ruby</span><span class="t-emerald">E Emerald</span>
-      <span class="hint">SECRET super-bosses (rare ? portals; each drops a relic)</span>
+      <span class="hint">SECRET super-bosses — far stronger than Tiamat; each drops a relic</span>
     </div>
     <div class="controls-help">
-      Move: WASD/HJKL/Arrows (HOLD to walk) · Left-click: attack / move · F ability · Q potion · X defend · . wait · B shop (on M) · C stat menu
+      Move: WASD/HJKL/Arrows (HOLD) · Click: attack/move · F class ability · 1/3 skill slots · T skill tree · C stats · Q potion · X defend · . wait · B shop(M) · V smith(A)
     </div>
 
     <ul id="log" class="log"></ul>
 
     <div class="buttons">
       <button id="statButton">📜 Stats (C)</button>
+      <button id="skillButton">🌳 Skills (T)</button>
       <button id="autoButton">▶ Auto-Play Demo</button>
       <button id="speedButton">⏩ 1x</button>
       <button id="restartButton">↻ Restart</button>
@@ -85,7 +89,7 @@
       <button class="class-btn" data-class="1"><strong>1) Fighter</strong> — High armor and HP. Ability: Second Wind.</button>
       <button class="class-btn" data-class="2"><strong>2) Rogue</strong> — Fast and deadly. Ability: Sneak Strike.</button>
       <button class="class-btn" data-class="3"><strong>3) Wizard</strong> — Fragile caster. Ability: Firebolt.</button>
-      <p class="hint">Death only returns you to Floor 1 — everything you earned is kept forever. Only "Erase data" wipes.</p>
+      <p class="hint">Death only returns you to Floor 1 — everything is kept. Only "Erase data" wipes.</p>
     </div>
   </div>
 
@@ -106,12 +110,34 @@
     </div>
   </div>
 
+  <div id="smithOverlay" class="overlay hidden">
+    <div class="panel shop-panel">
+      <h2>⚒ Blacksmith</h2>
+      <p id="smithGold" class="shop-gold"></p>
+      <div id="smithList" class="shop-list"></div>
+      <p class="hint">Press 1 to enhance · Esc / V to leave · Enhancement adds +1 raw AND +2% damage</p>
+    </div>
+  </div>
+
   <div id="statOverlay" class="overlay hidden">
     <div class="panel shop-panel">
-      <h2>✦ Character Sheet ✦</h2>
+      <h2>✦ Character Sheet </h2>
       <p id="statPts" class="shop-gold"></p>
       <div id="statList" class="shop-list"></div>
-      <p class="hint">1–4 spend a point · Esc / C to close · CON +2 HP/pt · DEX +1 AC per +2 mod</p>
+      <p class="hint">1–4 spend a point · Esc / C to close · stats also grant % damage</p>
+    </div>
+  </div>
+
+  <div id="skillOverlay" class="overlay hidden">
+    <div class="panel shop-panel">
+      <h2>🌳 Skill Tree</h2>
+      <p id="skillPts" class="shop-gold"></p>
+      <div class="hud-row" style="justify-content:center">
+        <button id="slot1Button" class="shop-item" style="flex:1"></button>
+        <button id="slot2Button" class="shop-item" style="flex:1"></button>
+      </div>
+      <div id="skillList" class="shop-list"></div>
+      <p class="hint">1–9 learn node · Q/E cycle slot 1/2 · Esc / T to close</p>
     </div>
   </div>
 
